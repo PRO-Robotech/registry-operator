@@ -59,6 +59,13 @@ var (
 		Help: "Repository enrollment requests, by outcome.",
 	}, []string{"outcome"})
 
+	// EnrollmentCompensations — компенсации записи репозитория, опоздавшей к
+	// закрытию регистри: unregistered, refused, abandoned.
+	EnrollmentCompensations = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "registry_operator_enrollment_compensations_total",
+		Help: "Compensations of repository registrations that arrived after their registry began closing, by outcome.",
+	}, []string{"outcome"})
+
 	// DeletionSteps — шаги удаления: deleted, waiting, released.
 	DeletionSteps = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "registry_operator_deletion_steps_total",
@@ -68,5 +75,5 @@ var (
 
 func init() {
 	ctrlmetrics.Registry.MustRegister(StepOutcomes, Refusals, PhaseTransitions, SyncEpochAdvances, ChartVerifications,
-		Registrations, Enrollments, DeletionSteps)
+		Registrations, Enrollments, EnrollmentCompensations, DeletionSteps)
 }

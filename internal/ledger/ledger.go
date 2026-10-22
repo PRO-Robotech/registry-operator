@@ -11,9 +11,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -22,6 +24,12 @@ import (
 
 // ErrNoChange — изменение не нужно; запись не делается.
 var ErrNoChange = errors.New("reservation needs no change")
+
+// conflictBackoff — повтор с чтения при конфликте версий. Писателей описи
+// несколько (проход заказа и эндпоинты заявок всех реплик), и под
+// параллельными заявками одного регистри конфликт — норма, а не сбой:
+// отступ с разбросом разводит писателей, срок держит контекст вызова.
+var conflictBackoff = wait.Backoff{Steps: 12, Duration: 5 * time.Millisecond, Factor: 1.5, Jitter: 1.0, Cap: 500 * time.Millisecond}
 
 // Store — запись статуса резерва с оптимистичной блокировкой.
 type Store struct {
@@ -37,7 +45,7 @@ type Store struct {
 // есть.
 func (s *Store) Mutate(ctx context.Context, id string, fn func(*registryv1alpha1.RegistryIDReservation) error) (*registryv1alpha1.RegistryIDReservation, error) {
 	var out *registryv1alpha1.RegistryIDReservation
-	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+	err := retry.RetryOnConflict(conflictBackoff, func() error {
 		res := &registryv1alpha1.RegistryIDReservation{}
 		if err := s.Reader.Get(ctx, types.NamespacedName{Name: id}, res); err != nil {
 			return err

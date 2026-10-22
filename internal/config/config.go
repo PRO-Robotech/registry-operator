@@ -82,7 +82,9 @@ type Enrollment struct {
 	Audience string `json:"audience"`
 	// MaxRepositories — предел описи репозиториев одного регистри.
 	MaxRepositories int `json:"maxRepositories"`
-	// RatePerMinute и Burst — темп заявок одного регистри.
+	// RatePerMinute и Burst — темп новых репозиториев одного регистри во
+	// всём кластере: реплики делят его через опись (отметки заявок в резерве
+	// id), а не держат каждая свой.
 	RatePerMinute int `json:"ratePerMinute"`
 	Burst         int `json:"burst"`
 	// EnrollerGrace — сколько субъект, заведший репозиторий, вправе писать в

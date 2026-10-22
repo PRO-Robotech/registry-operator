@@ -10,11 +10,19 @@
 //     годится);
 //   - регистри жив, резерв его id активен, ресурс регистри уже записан в IAM
 //     и снятие не начато;
-//   - опись не превысила предел, темп заявок регистри не превышен.
+//   - опись не превысила предел, темп новых репозиториев регистри не
+//     превышен.
 //
 // Запись идёт намерением: сначала опись (резерв id), затем IAM. Опись —
-// источник истины для снятия: репозиторий, записанный в IAM, всегда есть в
-// описи.
+// источник истины для снятия: репозиторий, записанный в IAM, есть в описи;
+// запись, опоздавшая к закрытию регистри, снимается компенсацией.
+//
+// Учёт нагрузки — двух родов. Темп новых репозиториев — свойство регистри
+// во всём кластере: он считается по описи (отметки EnrolledAt) внутри той же
+// записи под версией объекта, поэтому реплики делят один темп. Учёт проверок
+// токенов — защита процесса и API-сервера от потока без годного токена: он
+// по источнику (адрес пода), в памяти реплики, и поток одного источника не
+// расходует учёт другого.
 package enroll
 
 import (
@@ -24,6 +32,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"slices"
 	"strings"
@@ -77,7 +86,8 @@ func (k KubeTokenReviewer) Review(ctx context.Context, token, audience string) (
 	return ns, name, nil
 }
 
-// Limits — предел описи и темп заявок одного регистри.
+// Limits — предел описи и темп новых репозиториев одного регистри (темп —
+// на регистри во всём кластере, см. withinRate).
 type Limits struct {
 	MaxRepositories int
 	RatePerMinute   int
@@ -101,31 +111,132 @@ type Server struct {
 	Now          func() time.Time
 	Log          *slog.Logger
 
-	// global — общий темп проверок токенов: неаутентифицированный поток не
-	// превращает эндпоинт в усилитель нагрузки на API-сервер.
-	global *rate.Limiter
-	mu     sync.Mutex
-	perReg map[string]*rate.Limiter
+	once    sync.Once
+	mux     *http.ServeMux
+	sources *sourceLimiter
+	// pending — идущие компенсации (Drain ждёт их при остановке).
+	pending sync.WaitGroup
 }
 
-// Handler — маршруты эндпоинта.
+// Учёт проверок токенов по источнику: темп и запас одного адреса, предел
+// числа учитываемых адресов.
+const (
+	sourceRate  rate.Limit = 10
+	sourceBurst            = 20
+	maxSources             = 4096
+)
+
+// Компенсация записи, опоздавшей к закрытию: срок всех попыток и отступы
+// между ними.
+const (
+	compensationBudget     = 2 * time.Minute
+	compensationFirstDelay = 100 * time.Millisecond
+	compensationMaxDelay   = 10 * time.Second
+)
+
+// Handler — маршруты эндпоинта; состояние создаётся один раз, повторный
+// вызов отдаёт тот же обработчик.
 func (s *Server) Handler() http.Handler {
-	s.global = rate.NewLimiter(rate.Limit(50), 100)
-	s.perReg = map[string]*rate.Limiter{}
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST "+api.Path, s.enroll)
-	return mux
+	s.once.Do(func() {
+		s.sources = &sourceLimiter{entries: map[string]*sourceEntry{}}
+		s.mux = http.NewServeMux()
+		s.mux.HandleFunc("POST "+api.Path, s.enroll)
+	})
+	return s.mux
 }
 
-func (s *Server) limiter(id string) *rate.Limiter {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	l, ok := s.perReg[id]
-	if !ok {
-		l = rate.NewLimiter(rate.Every(time.Minute/time.Duration(s.Limits.RatePerMinute)), s.Limits.Burst)
-		s.perReg[id] = l
+// Drain ждёт идущих компенсаций либо конца ctx (остановка процесса).
+func (s *Server) Drain(ctx context.Context) error {
+	done := make(chan struct{})
+	go func() {
+		s.pending.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
-	return l
+}
+
+// sourceLimiter — учёт проверок токенов по адресу источника.
+type sourceLimiter struct {
+	mu      sync.Mutex
+	entries map[string]*sourceEntry
+}
+
+type sourceEntry struct {
+	lim  *rate.Limiter
+	seen time.Time
+}
+
+// allow — расход одной проверки источника src. Учёт источника, молчавшего
+// дольше полного пополнения, снимается при нехватке места: его запас полон,
+// и новый учёт неотличим от прежнего. Мест нет и после снятия — отказ
+// новому источнику (а не сброс чужого учёта).
+func (l *sourceLimiter) allow(src string) bool {
+	now := time.Now()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	e, ok := l.entries[src]
+	if !ok {
+		if len(l.entries) >= maxSources {
+			idle := time.Duration(float64(sourceBurst) / float64(sourceRate) * float64(time.Second))
+			for k, x := range l.entries {
+				if now.Sub(x.seen) >= idle {
+					delete(l.entries, k)
+				}
+			}
+		}
+		if len(l.entries) >= maxSources {
+			return false
+		}
+		e = &sourceEntry{lim: rate.NewLimiter(sourceRate, sourceBurst)}
+		l.entries[src] = e
+	}
+	e.seen = now
+	return e.lim.AllowN(now, 1)
+}
+
+// sourceOf — адрес источника соединения (без порта).
+func sourceOf(req *http.Request) string {
+	host, _, err := net.SplitHostPort(req.RemoteAddr)
+	if err != nil {
+		return req.RemoteAddr
+	}
+	return host
+}
+
+// withinRate — темп новых репозиториев регистри: ведро ёмкости burst,
+// пополняемое perMinute жетонами в минуту, восстанавливается по отметкам
+// EnrolledAt всей описи. Отметка из будущего (расхождение часов реплик)
+// считается сейчас.
+func withinRate(repos []registryv1alpha1.RegisteredRepository, now time.Time, perMinute, burst int) bool {
+	if perMinute <= 0 || burst <= 0 {
+		return false
+	}
+	per := float64(time.Minute) / float64(perMinute)
+	times := make([]time.Time, 0, len(repos))
+	for _, r := range repos {
+		t := r.EnrolledAt.Time
+		if t.After(now) {
+			t = now
+		}
+		times = append(times, t)
+	}
+	slices.SortFunc(times, time.Time.Compare)
+	tokens, capacity := float64(burst), float64(burst)
+	for i, t := range times {
+		if i > 0 {
+			tokens = min(capacity, tokens+float64(t.Sub(times[i-1]))/per)
+		}
+		tokens = max(0, tokens-1)
+	}
+	if len(times) > 0 {
+		tokens = min(capacity, tokens+float64(now.Sub(times[len(times)-1]))/per)
+	}
+	return tokens >= 1
 }
 
 func (s *Server) reply(w http.ResponseWriter, outcome string) {
@@ -150,7 +261,9 @@ func (s *Server) enroll(w http.ResponseWriter, req *http.Request) {
 		s.reply(w, api.OutcomeUnauthenticated)
 		return
 	}
-	if !s.global.Allow() {
+	// Учёт — до TokenReview и по источнику: поток без годного токена
+	// упирается в свой учёт и не тратит чужой.
+	if !s.sources.allow(sourceOf(req)) {
 		s.reply(w, api.OutcomeLimited)
 		return
 	}
@@ -175,54 +288,47 @@ func (s *Server) enroll(w http.ResponseWriter, req *http.Request) {
 		s.reply(w, api.OutcomeInvalid)
 		return
 	}
-	reg, res, scope, outcome := s.registry(ctx, id, ns)
+	reg, scope, outcome := s.registry(ctx, id, ns)
 	if outcome != "" {
 		s.reply(w, outcome)
-		return
-	}
-	// Темп считает только новые заявки: повтор заявленного (каждый запрос
-	// push, пока IAM материализует права потомков) темп не расходует.
-	known := slices.ContainsFunc(res.Status.Repositories, func(r registryv1alpha1.RegisteredRepository) bool { return r.Name == body.Repository })
-	if !known && !s.limiter(id).Allow() {
-		s.reply(w, api.OutcomeLimited)
 		return
 	}
 	s.reply(w, s.register(ctx, reg, scope, body))
 }
 
 // registry — заказ id в namespace вызывающего, годный для заявки.
-func (s *Server) registry(ctx context.Context, id, ns string) (*registryv1alpha1.Registry, *registryv1alpha1.RegistryIDReservation, kaname.Scope, string) {
+func (s *Server) registry(ctx context.Context, id, ns string) (*registryv1alpha1.Registry, kaname.Scope, string) {
 	res := &registryv1alpha1.RegistryIDReservation{}
 	if err := s.Reader.Get(ctx, types.NamespacedName{Name: id}, res); err != nil {
 		if apierrors.IsNotFound(err) {
-			return nil, nil, kaname.Scope{}, api.OutcomeUnknown
+			return nil, kaname.Scope{}, api.OutcomeUnknown
 		}
-		return nil, nil, kaname.Scope{}, api.OutcomeUnavailable
+		return nil, kaname.Scope{}, api.OutcomeUnavailable
 	}
 	ref := res.Spec.RegistryRef
 	if res.Status.Phase != registryv1alpha1.ReservationActive || ref.Namespace != ns {
 		// Регистри другого арендатора неотличим от несуществующего.
-		return nil, nil, kaname.Scope{}, api.OutcomeUnknown
+		return nil, kaname.Scope{}, api.OutcomeUnknown
 	}
 	reg := &registryv1alpha1.Registry{}
 	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: ref.Namespace, Name: ref.Name}, reg); err != nil {
 		if apierrors.IsNotFound(err) {
-			return nil, nil, kaname.Scope{}, api.OutcomeUnknown
+			return nil, kaname.Scope{}, api.OutcomeUnknown
 		}
-		return nil, nil, kaname.Scope{}, api.OutcomeUnavailable
+		return nil, kaname.Scope{}, api.OutcomeUnavailable
 	}
 	if string(reg.UID) != ref.UID {
-		return nil, nil, kaname.Scope{}, api.OutcomeUnknown
+		return nil, kaname.Scope{}, api.OutcomeUnknown
 	}
 	rec := res.Status.Registration
 	switch {
 	case !reg.DeletionTimestamp.IsZero() || (rec != nil && rec.ClosingAt != nil):
-		return nil, nil, kaname.Scope{}, api.OutcomeClosing
+		return nil, kaname.Scope{}, api.OutcomeClosing
 	case rec == nil || rec.RegisteredAt == nil:
 		// Репозиторий без записанного регистри выпал бы из каскада.
-		return nil, nil, kaname.Scope{}, api.OutcomeUnavailable
+		return nil, kaname.Scope{}, api.OutcomeUnavailable
 	}
-	return reg, res, kaname.Scope{Project: rec.Project, Account: rec.Account}, ""
+	return reg, kaname.Scope{Project: rec.Project, Account: rec.Account}, ""
 }
 
 // errOutcome — исход, найденный внутри изменения описи.
@@ -254,6 +360,13 @@ func (s *Server) register(ctx context.Context, reg *registryv1alpha1.Registry, s
 		if len(res.Status.Repositories) >= s.Limits.MaxRepositories {
 			return errOutcome(api.OutcomeLimited)
 		}
+		// Темп — по описи внутри этой же записи: решение и новая отметка
+		// атомарны, реплики делят один темп. Повтор заявленного (каждый
+		// запрос push, пока IAM материализует права потомков) сюда не
+		// доходит и темп не расходует.
+		if !withinRate(res.Status.Repositories, now, s.Limits.RatePerMinute, s.Limits.Burst) {
+			return errOutcome(api.OutcomeLimited)
+		}
 		entry = registryv1alpha1.RegisteredRepository{Name: body.Repository, EnrolledBy: body.Subject, EnrolledAt: metav1.NewTime(now)}
 		res.Status.Repositories = append(res.Status.Repositories, entry)
 		created = true
@@ -271,7 +384,8 @@ func (s *Server) register(ctx context.Context, reg *registryv1alpha1.Registry, s
 		return api.OutcomeEnrolledBySelf
 	}
 
-	err = s.Kaname.Register(ctx, kaname.RepositoryRegistration(id, body.Repository, scope, kaname.Version(reg.CreationTimestamp.Time, reg.Generation)))
+	repo := kaname.RepositoryRegistration(id, body.Repository, scope, kaname.Version(reg.CreationTimestamp.Time, reg.Generation))
+	err = s.Kaname.Register(ctx, repo)
 	switch {
 	case errors.Is(err, kaname.ErrRefused), errors.Is(err, kaname.ErrInvalid):
 		s.Log.Error("enrollment: kaname refused the repository", "registry", id, "repository", body.Repository, "err", err)
@@ -299,11 +413,10 @@ func (s *Server) register(ctx context.Context, reg *registryv1alpha1.Registry, s
 	})
 	switch {
 	case errors.As(err, &eo):
-		// Снятие началось между записью в IAM и отметкой: снимаем свою
-		// запись сами, снятие заказа её уже не увидит.
-		if uerr := s.Kaname.Unregister(ctx, kaname.RepositoryRegistration(id, body.Repository, scope, kaname.Version(reg.CreationTimestamp.Time, reg.Generation))); uerr != nil {
-			s.Log.Error("enrollment: compensation failed", "registry", id, "repository", body.Repository, "err", uerr)
-		}
+		// Снятие началось между записью в IAM и отметкой. Снятие по описи
+		// могло пройти раньше этой записи и её не увидеть — запись снимаем
+		// сами, с повтором.
+		s.compensate(ctx, repo)
 		return string(eo)
 	case err != nil:
 		s.Log.Error("enrollment: ledger mark failed", "registry", id, "err", err)
@@ -313,6 +426,44 @@ func (s *Server) register(ctx context.Context, reg *registryv1alpha1.Registry, s
 		return api.OutcomeCreated
 	}
 	return api.OutcomeEnrolledBySelf
+}
+
+// compensate — снять запись репозитория в IAM, сделанную заявкой после
+// начала снятия регистри. Попытки идут вне запроса (ответ заявке их не
+// ждёт), в контексте без отмены запроса, с отступом, пока IAM не ответит
+// либо не истечёт срок; отказ по существу не повторяется. Drain ждёт их при
+// остановке.
+func (s *Server) compensate(parent context.Context, repo kaname.Registration) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), compensationBudget)
+	s.pending.Go(func() {
+		defer cancel()
+		delay := compensationFirstDelay
+		for attempt := 1; ; attempt++ {
+			actx, acancel := context.WithTimeout(ctx, s.Limits.RequestTimeout)
+			err := s.Kaname.Unregister(actx, repo)
+			acancel()
+			switch {
+			case err == nil:
+				metrics.EnrollmentCompensations.WithLabelValues("unregistered").Inc()
+				return
+			case errors.Is(err, kaname.ErrRefused), errors.Is(err, kaname.ErrInvalid):
+				metrics.EnrollmentCompensations.WithLabelValues("refused").Inc()
+				s.Log.Error("enrollment: compensation refused", "repository", repo.Object, "err", err)
+				return
+			}
+			s.Log.Warn("enrollment: compensation will be retried", "repository", repo.Object, "attempt", attempt, "err", err)
+			t := time.NewTimer(delay)
+			select {
+			case <-ctx.Done():
+				t.Stop()
+				metrics.EnrollmentCompensations.WithLabelValues("abandoned").Inc()
+				s.Log.Error("enrollment: compensation abandoned; the repository stays in IAM outside the ledger", "repository", repo.Object, "attempts", attempt)
+				return
+			case <-t.C:
+			}
+			delay = min(2*delay, compensationMaxDelay)
+		}
+	})
 }
 
 // drop — снять из описи заявку, отвергнутую IAM.

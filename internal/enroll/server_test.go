@@ -27,6 +27,7 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	registryv1alpha1 "github.com/PRO-Robotech/registry-operator/api/v1alpha1"
 	"github.com/PRO-Robotech/registry-operator/internal/enroll"
@@ -93,12 +94,51 @@ func registered(t *testing.T) (*registryv1alpha1.Registry, *registryv1alpha1.Reg
 
 func newEnv(t *testing.T, edit func(*registryv1alpha1.Registry, *registryv1alpha1.RegistryIDReservation), limits enroll.Limits) *env {
 	t.Helper()
+	return newGatedEnv(t, edit, limits, nil)
+}
+
+// gate — первые n записей описи ждут друг друга: все n писателей прочли
+// одну версию, и в первом круге выигрывает ровно один (без версии объекта —
+// все n). Так гонка проб детерминирована.
+type gate struct {
+	n       int
+	mu      sync.Mutex
+	arrived int
+	open    chan struct{}
+}
+
+func newGate(n int) *gate { return &gate{n: n, open: make(chan struct{})} }
+
+func (g *gate) wait() {
+	g.mu.Lock()
+	g.arrived++
+	if g.arrived == g.n {
+		close(g.open)
+	}
+	g.mu.Unlock()
+	select {
+	case <-g.open:
+	case <-time.After(5 * time.Second):
+	}
+}
+
+func newGatedEnv(t *testing.T, edit func(*registryv1alpha1.Registry, *registryv1alpha1.RegistryIDReservation), limits enroll.Limits, g *gate) *env {
+	t.Helper()
 	reg, res := registered(t)
 	if edit != nil {
 		edit(reg, res)
 	}
-	c := fake.NewClientBuilder().WithScheme(scheme(t)).WithObjects(reg, res).
-		WithStatusSubresource(&registryv1alpha1.RegistryIDReservation{}, &registryv1alpha1.Registry{}).Build()
+	b := fake.NewClientBuilder().WithScheme(scheme(t)).WithObjects(reg, res).
+		WithStatusSubresource(&registryv1alpha1.RegistryIDReservation{}, &registryv1alpha1.Registry{})
+	if g != nil {
+		b = b.WithInterceptorFuncs(interceptor.Funcs{
+			SubResourceUpdate: func(ctx context.Context, c client.Client, sub string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+				g.wait()
+				return c.SubResource(sub).Update(ctx, obj, opts...)
+			},
+		})
+	}
+	c := b.Build()
 	f := kanametest.New("unused")
 	f.RegisterDirect("registry_registry:abc123", kanametest.Object{
 		Subject: "project:prj1", Relation: "project", ParentChain: []string{"project:prj1"}, ParentProjectID: "prj1", ParentAccountID: "acc1",
@@ -337,7 +377,8 @@ func TestEnroll_RefusedRepositoryLeavesNoLedgerEntry(t *testing.T) {
 }
 
 // Снятие началось, пока заявка писала в IAM: заявка снимает свою запись
-// сама — снятие заказа её уже не увидит.
+// сама (компенсация идёт вне ответа) — снятие по описи могло пройти раньше
+// и её не увидеть.
 func TestEnroll_ClosingDuringTheWriteIsCompensated(t *testing.T) {
 	e := newEnv(t, nil, defaultLimits())
 	inner := e.kn
@@ -355,8 +396,21 @@ func TestEnroll_ClosingDuringTheWriteIsCompensated(t *testing.T) {
 	if code, _ := e.post("tok-zot", "abc123", "team/app", "service_account:sva1"); code != http.StatusGone {
 		t.Fatalf("got %d", code)
 	}
-	if _, ok := e.fake.Objects()["registry_repository:abc123/team/app"]; ok {
-		t.Fatal("the repository outlived the closing of its registry")
+	e.eventuallyGone("registry_repository:abc123/team/app")
+}
+
+// eventuallyGone — объект снят в IAM в пределах срока компенсации проб.
+func (e *env) eventuallyGone(obj string) {
+	e.t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, ok := e.fake.Objects()[obj]; !ok {
+			return
+		}
+		if time.Now().After(deadline) {
+			e.t.Fatalf("%s outlived the closing of its registry", obj)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 
@@ -526,24 +580,15 @@ func TestEnroll_CompensationIsRetriedUntilIAMAnswers(t *testing.T) {
 	if code, _ := e.post("tok-zot", "abc123", "team/app", "service_account:sva1"); code != http.StatusGone {
 		t.Fatalf("got %d", code)
 	}
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		if _, ok := e.fake.Objects()["registry_repository:abc123/team/app"]; !ok {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the repository outlived a compensation that failed twice")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	e.eventuallyGone("registry_repository:abc123/team/app")
 }
 
 // Опись под конкурирующими писателями: три случая заказа ревью.
 func TestEnroll_ConcurrentEnrollmentsOfOneNewRepository(t *testing.T) {
-	e := newEnv(t, nil, defaultLimits())
+	const n = 9
+	e := newGatedEnv(t, nil, defaultLimits(), newGate(n))
 	replicas := []string{e.srv.URL, e.replica().URL, e.replica().URL}
 	c := fromSource("127.0.0.1")
-	const n = 9
 	statuses := make([]int, n)
 	errs := make([]error, n)
 	var wg sync.WaitGroup
@@ -580,15 +625,15 @@ func TestEnroll_ConcurrentEnrollmentsOfOneNewRepository(t *testing.T) {
 func TestEnroll_ConcurrentEnrollmentsAtTheLastFreeSlot(t *testing.T) {
 	l := defaultLimits()
 	l.MaxRepositories = 4
-	e := newEnv(t, func(_ *registryv1alpha1.Registry, res *registryv1alpha1.RegistryIDReservation) {
+	const n = 8
+	e := newGatedEnv(t, func(_ *registryv1alpha1.Registry, res *registryv1alpha1.RegistryIDReservation) {
 		old := metav1.NewTime(time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC))
 		for _, name := range []string{"x", "y", "z"} {
 			res.Status.Repositories = append(res.Status.Repositories, registryv1alpha1.RegisteredRepository{Name: name, EnrolledBy: "user:usr0", EnrolledAt: old, Registered: true})
 		}
-	}, l)
+	}, l, newGate(n))
 	replicas := []string{e.srv.URL, e.replica().URL}
 	c := fromSource("127.0.0.1")
-	const n = 8
 	statuses := make([]int, n)
 	var wg sync.WaitGroup
 	start := make(chan struct{})

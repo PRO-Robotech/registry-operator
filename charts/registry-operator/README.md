@@ -3,7 +3,10 @@
 Ставит оператор заказов `Registry`: CRD (`crds/`), учётку, ClusterRole из маркеров
 (`files/role.yaml`, `make manifests`: запись — только шести ведомых видов и своих объектов,
 прочее — чтение), Role выборов лидера, конфигурацию, Service (эндпоинт заявок и метрики),
-Deployment и два Certificate cert-manager.
+Deployment, два Certificate cert-manager и NetworkPolicy: вход на эндпоинт заявок — только
+от подов zot (`networkPolicy.zotPodLabels`) из namespace арендаторов
+(`networkPolicy.tenantNamespaceSelector`), метрики — от `networkPolicy.metricsFrom` (пусто —
+от любого пода). Кластеру нужен CNI, исполняющий NetworkPolicy.
 
 ## Обязательные значения
 

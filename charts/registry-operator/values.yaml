@@ -50,6 +50,21 @@ enrollment:
 metrics:
   port: 8080
 
+# Политика сети подов оператора (templates/networkpolicy.yaml): вход на
+# эндпоинт заявок — только от подов zot из namespace арендаторов.
+networkPolicy:
+  # Метки подов zot (чарт registry-instance).
+  zotPodLabels:
+    app.kubernetes.io/name: zot
+    app.kubernetes.io/part-of: registry
+  # namespace арендаторов: метку проекта ставит платформа.
+  tenantNamespaceSelector:
+    matchExpressions:
+    - key: kaname.in-cloud.io/project-id
+      operator: Exists
+  # Источники метрик (элементы from NetworkPolicy); пусто — любой под.
+  metricsFrom: []
+
 resources:
   requests:
     cpu: 50m
