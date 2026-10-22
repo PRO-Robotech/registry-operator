@@ -24,9 +24,12 @@ import (
 
 // keyIssuer — издатель ключей проб: отвечает набором, отказом либо молчит.
 type keyIssuer struct {
-	key     *ecdsa.PrivateKey
-	hits    atomic.Int64
-	mode    atomic.Int32 // issuerServes, issuerFails либо issuerSilent
+	key  *ecdsa.PrivateKey
+	hits atomic.Int64
+	mode atomic.Int32 // issuerServes, issuerFails либо issuerSilent
+	// asked — по сигналу на каждое обращение: проба дожидается обращения,
+	// ушедшего в стороне, событием, а не сном.
+	asked   chan struct{}
 	release chan struct{}
 }
 
@@ -42,10 +45,14 @@ func newIssuer(t *testing.T) (*keyIssuer, *httptest.Server) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	is := &keyIssuer{key: key, release: make(chan struct{})}
+	is := &keyIssuer{key: key, asked: make(chan struct{}, 64), release: make(chan struct{})}
 	is.mode.Store(issuerServes)
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		is.hits.Add(1)
+		select {
+		case is.asked <- struct{}{}:
+		default:
+		}
 		switch is.mode.Load() {
 		case issuerFails:
 			w.WriteHeader(http.StatusBadGateway)
@@ -109,6 +116,7 @@ func TestVerifier_SilentIssuerDoesNotSerializeRequests(t *testing.T) {
 	if _, err := v.Verify(context.Background(), tok); err != nil {
 		t.Fatal(err)
 	}
+	<-is.asked // первое обращение — синхронное, сигнал уже в буфере.
 	is.mode.Store(issuerSilent)
 	ck.Advance(2 * time.Minute)
 
@@ -132,6 +140,15 @@ func TestVerifier_SilentIssuerDoesNotSerializeRequests(t *testing.T) {
 	}
 	if elapsed > time.Second {
 		t.Fatalf("%d requests took %v behind a silent issuer", n, elapsed)
+	}
+	// Обновление идёт в стороне и может дойти до издателя позже, чем
+	// ответили все запросы: ждём его обращения. Пока оно висит на молчащем
+	// издателе, второго обновления нет (одно на всех), поэтому счёт после
+	// сигнала окончателен.
+	select {
+	case <-is.asked:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("the refresh never asked the issuer: asked %d times", is.hits.Load())
 	}
 	if h := is.hits.Load(); h != 2 {
 		t.Fatalf("issuer asked %d times, want the first fetch and one refresh", h)
