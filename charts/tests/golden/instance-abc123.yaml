@@ -152,20 +152,30 @@ spec:
         - name: iam-proxy
           image: "docker.io/prorobotech/registry-iam-proxy:v0.1.0@sha256:2e7b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809"
           imagePullPolicy: IfNotPresent
+          # Флаги — контракт cmd/iam-proxy (README.md, «Интерфейс iam-proxy»); перечень
+          # сверяет проба charts/tests с таблицей README, лишний или пропущенный флаг — красное.
           args:
             - --listen=:8080
             - --health-listen=:8081
             - --upstream=http://127.0.0.1:5000
+            - --upstream-ready-path=/readyz
             - "--registry-id=abc123"
-            - "--anonymous-pull=false"
-            - "--kaname-api-url=https://kaname.example.test"
+            - "--public=false"
             - "--jwks-url=https://kaname.example.test:9097/.well-known/jwks.json"
+            - "--jwks-ca=/etc/registry/ca/ca.crt"
             - "--issuer=https://kaname.example.test"
             - "--audience=registry"
-            - "--ca-file=/etc/registry/ca/ca.crt"
-            - "--decision-cache-ttl=10s"
-            - "--registration-url=https://registry-operator.registry-system.svc:9443/v1/repositories"
-            - "--registration-token-file=/var/run/secrets/registry-operator/token"
+            - "--kaname-address=kaname.example.test:9090"
+            - "--kaname-server-name=kaname.example.test"
+            - "--kaname-ca=/etc/registry/ca/ca.crt"
+            - "--check-timeout=2s"
+            - "--cache-ttl=10s"
+            - "--enroll-url=https://registry-operator.registry-system.svc:8443"
+            - "--enroll-ca=/etc/registry/ca/ca.crt"
+            - "--enroll-token-file=/var/run/secrets/registry-operator/token"
+            - "--enroll-timeout=15s"
+            - "--realm=https://registry.example.test/iam/token"
+            - "--service=registry.example.test"
           ports:
             - name: proxy
               containerPort: 8080
@@ -173,12 +183,24 @@ spec:
             - name: health
               containerPort: 8081
               protocol: TCP
+          # Готовность пода — /readyz iam-proxy: 200, только пока zot отвечает 200 на свой
+          # /readyz (127.0.0.1:5000, --upstream-ready-path) в пределах дедлайна и набор ключей
+          # kaname загружен хотя бы раз; доступность Check kaname в готовность не входит.
+          # zot слушает loopback, kubelet до него не достаёт, поэтому своих проб у zot нет:
+          # зависший zot даёт Unready (трафик снят, Registry не Ready), а не перезапуск.
+          startupProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            periodSeconds: 5
+            failureThreshold: 60
           readinessProbe:
             httpGet:
               path: /readyz
               port: health
             periodSeconds: 10
             failureThreshold: 3
+          # Живость — только процесс iam-proxy: перезапуск пода из-за S3 или kaname не лечит ни то, ни другое.
           livenessProbe:
             httpGet:
               path: /healthz
@@ -304,7 +326,7 @@ spec:
         - matchName: "kaname.example.test"
       toPorts:
         - ports:
-            - port: "443"
+            - port: "9090"
               protocol: TCP
             - port: "9097"
               protocol: TCP
@@ -314,5 +336,38 @@ spec:
             "k8s:app.kubernetes.io/name": "registry-operator"
       toPorts:
         - ports:
-            - port: "9443"
+            - port: "8443"
               protocol: TCP
+---
+# Source: registry-instance/templates/referencegrant.yaml
+# Разрешение маршруту заказа ссылаться на Service zot-<id>. Маршрут /v2/<id>/ ставит
+# registry-operator в namespace маршрутов края (site.edge.routeNamespace), Service живёт
+# здесь, в namespace арендатора; без разрешения Gateway API ссылку не разрешает
+# (ResolvedRefs=False, RefNotPermitted). Разрешено ровно одно ребро: HTTPRoute из
+# namespace маршрутов края → Service zot-<id>; прочие Service арендатора закрыты, а
+# маршруты из других namespace сослаться не могут. Волна 0 — раньше, чем маршрут
+# начнёт разрешаться.
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: "zot-abc123"
+  labels:
+    app.kubernetes.io/name: zot
+    app.kubernetes.io/instance: "zot-abc123"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/component: "edge"
+    app.kubernetes.io/managed-by: registry-operator
+    registry.in-cloud.io/id: "abc123"
+    registry.in-cloud.io/namespace: "cust01"
+    registry.in-cloud.io/owner-uid: "3f1c2a9e-7b4d-4e8a-9c21-5d6f7a8b9c0d"
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: "registry-edge"
+  to:
+    - group: ""
+      kind: Service
+      name: "zot-abc123"
