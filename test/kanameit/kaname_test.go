@@ -472,8 +472,9 @@ func (e *enroller) Enroll(ctx context.Context, repo, _ string) error {
 }
 
 type proxy struct {
-	srv *httptest.Server
-	zot *zot
+	srv      *httptest.Server
+	zot      *zot
+	registry string
 }
 
 // newProxy — прокси одного регистри из частей пода: проверка токена ключами
@@ -516,7 +517,7 @@ func (w *world) newProxy(t *testing.T, registry string, public bool, cacheTTL ti
 	}
 	ps := httptest.NewServer(p)
 	t.Cleanup(ps.Close)
-	return &proxy{srv: ps, zot: z}
+	return &proxy{srv: ps, zot: z, registry: registry}
 }
 
 // send — запрос к прокси; scheme — "bearer", "basic" (пароль docker login)
@@ -563,11 +564,46 @@ func (p *proxy) expect(t *testing.T, s subject, settle bool, steps ...step) {
 					break
 				}
 				if !settle || st.want != http.StatusOK || time.Now().After(deadline) {
+					p.explain(t, s, st.method, st.path)
 					t.Fatalf("%s %s (%s, %s): %d (zot reached %v), want %d", s.name, st.what, scheme, st.method+" "+st.path, resp.StatusCode, reached, st.want)
 				}
 				time.Sleep(time.Second)
 			}
 		}
+	}
+}
+
+// explain — к отказу шага: ответы kaname на те вопросы, которые задаёт
+// прокси по этому запросу (код и тело дословно: причины отказа kaname).
+func (p *proxy) explain(t *testing.T, s subject, method, path string) {
+	t.Helper()
+	req := httptest.NewRequest(method, path, nil)
+	rt := iamproxy.Parse(p.registry, req)
+	repo := kaname.RepositoryObject(p.registry, rt.Repository)
+	reg := kaname.RegistryObject(p.registry)
+	client, err := iamproxy.TLSClient(tlsPath("server-ca.crt"), 10*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []struct{ verb, object, action string }{
+		{iamproxy.VerbGet, repo, "registry.repositories.get"},
+		{iamproxy.VerbUpdate, repo, "registry.repositories.update"},
+		{iamproxy.VerbCreate, reg, "registry.registries.create"},
+	} {
+		typ, id, _ := strings.Cut(q.object, ":")
+		body, _ := json.Marshal(map[string]any{"subject": s.principal(), "resource": map[string]any{"type": typ, "id": id},
+			"action": q.action, "requiredRelation": q.verb})
+		r, _ := http.NewRequest(http.MethodPost, env["REGOP_IT_REST_URL"]+"/iam/v1/authorize:check", bytes.NewReader(body))
+		r.Header.Set("Authorization", "Bearer "+s.token)
+		r.Header.Set("Content-Type", "application/json")
+		resp, err := client.Do(r)
+		if err != nil {
+			t.Logf("explain %s %s: %v", q.verb, q.object, err)
+			continue
+		}
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		_ = resp.Body.Close()
+		t.Logf("explain %s %s %s: %d %s", s.principal(), q.verb, q.object, resp.StatusCode, b)
 	}
 }
 
