@@ -96,8 +96,8 @@ Gateway API, которых ещё нет. При установке `helm insta
   Права «на аккаунт» для людей и групп — выдача с областью `iam.account` и целью `allInScope`:
   её выдаёт платформа или владелец аккаунта, не оператор.
 - **Публичного чтения модуль не объявляет.** Анонимный pull включает только флаг `--public`
-  iam-proxy (переменная заказа `public`); кортежей с подстановочным субъектом registry-operator
-  не пишет.
+  iam-proxy (переменная заказа `public`); кортежей с подстановочным субъектом и выдач
+  системным классам `anonymous` и `authenticated` registry-operator не пишет (V1 их отвергает).
 - **Личность модуля** `kacho-registry` в аккаунте `kanameModule.systemAccount` и её вступление
   в `module-relation-writers`. Под ней registry-operator — единственный писатель типов
   `registry_*` — регистрирует ресурсы (`RegisterResource` на внутреннем листенере kaname по mTLS).
@@ -114,9 +114,9 @@ ConfigMap `<release>-admission` в `admission.paramsNamespace`, без пара�
 
 | | объект | правило |
 |---|---|---|
-| V1 | `iam.kaname.in-cloud.io` ServiceAccount, AccessBinding `zot-*` | пишет только registry-operator; выдача — роль из `admission.allowedRoles` на `registry.registries:<свой id>` своим роботам |
+| V1 | `iam.kaname.in-cloud.io` ServiceAccount, AccessBinding `zot-*` | пишет только registry-operator; выдача — роль из `admission.allowedRoles` (только роли манифеста модуля) на `registry.registries:<свой id>` своим роботам; субъект системного класса (`anonymous`, `authenticated`) — отказ |
 | V2 | `registries/status`, `registryidreservations/status` | только registry-operator — единственный их писатель |
-| V3 | `HTTPRoute zot-*` | только registry-operator; `/v2/<id>/` на хосте и Gateway регистри к `Service zot-<id>:8080` своего арендатора |
+| V3 | `HTTPRoute` с именем `zot-*` либо со ссылкой на `Service zot-*` | только registry-operator; `/v2/<id>/` на хосте и Gateway регистри к `Service zot-<id>:8080` своего арендатора. Ссылка судится наравне с именем: ReferenceGrant экземпляра открывает `zot-<id>` любому маршруту namespace края |
 | V4 | поды с SA `zot-*` | создаёт только replicaset-controller |
 | V5 | метки арендатора на namespace | только платформа |
 | V6 | `RegistryIDReservation` | создаёт registry-operator, снимает только платформа |

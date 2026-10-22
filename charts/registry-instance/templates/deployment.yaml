@@ -122,18 +122,22 @@ spec:
           # Готовность пода — /readyz iam-proxy: 200, только пока zot отвечает 200 на свой
           # /readyz (127.0.0.1:5000, --upstream-ready-path) в пределах дедлайна и набор ключей
           # kaname загружен хотя бы раз; доступность Check kaname в готовность не входит.
-          # zot слушает loopback, kubelet до него не достаёт, поэтому своих проб у zot нет:
-          # зависший zot даёт Unready (трафик снят, Registry не Ready), а не перезапуск.
+          # Свой вопрос к zot прокси задаёт со сроком 2 с, поэтому пробы ждут ответа 3 с: срок
+          # пробы короче срока прокси снимал бы медленный, но живой zot таймаутом kubelet.
+          # Своих проб у zot нет — решение: зависший zot даёт Unready (трафик снят, Registry
+          # не Ready), а не перезапуск.
           startupProbe:
             httpGet:
               path: /readyz
               port: health
+            timeoutSeconds: 3
             periodSeconds: 5
             failureThreshold: 60
           readinessProbe:
             httpGet:
               path: /readyz
               port: health
+            timeoutSeconds: 3
             periodSeconds: 10
             failureThreshold: 3
           # Живость — только процесс iam-proxy: перезапуск пода из-за S3 или kaname не лечит ни то, ни другое.
@@ -141,6 +145,7 @@ spec:
             httpGet:
               path: /healthz
               port: health
+            timeoutSeconds: 1
             periodSeconds: 20
             failureThreshold: 3
           volumeMounts:

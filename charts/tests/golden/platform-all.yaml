@@ -513,7 +513,7 @@ spec:
         operations: ["CREATE","UPDATE","DELETE"]
   matchConditions:
     - name: subject
-      expression: "(request.operation == 'DELETE' ? oldObject : object).metadata.name.startsWith('zot-')"
+      expression: "(request.operation == 'DELETE' ? oldObject : object).metadata.name.startsWith('zot-') || (request.operation == 'DELETE' ? oldObject : object).spec.?rules.orValue([]).exists(r, r.?backendRefs.orValue([]).exists(b, b.name.startsWith('zot-')))"
   variables:
     - name: "isOp"
       expression: "request.userInfo.username == params.data.registryOperator"
@@ -523,7 +523,7 @@ spec:
       expression: "(request.operation == 'DELETE' ? oldObject : object).metadata.?labels[?'registry.in-cloud.io/id'].orValue('')"
   validations:
     - expression: "variables.isOp || variables.isPlatform || (request.operation == 'UPDATE' \u0026\u0026 (has(object.spec) == has(oldObject.spec) \u0026\u0026 (!has(object.spec) || object.spec == oldObject.spec)) \u0026\u0026 (has(object.metadata.labels) == has(oldObject.metadata.labels) \u0026\u0026 (!has(object.metadata.labels) || object.metadata.labels == oldObject.metadata.labels)))"
-      message: "zot-* routes are written only by registry-operator"
+      message: "routes named zot-* or to a Service zot-* are written only by registry-operator"
       reason: Forbidden
     - expression: "request.operation == 'DELETE' || !variables.isOp || (request.namespace == params.data.routeNamespace \u0026\u0026 variables.id != '' \u0026\u0026 object.metadata.name == 'zot-' + variables.id \u0026\u0026 object.spec.?hostnames.orValue([]) == [params.data.routeHost] \u0026\u0026 size(object.spec.parentRefs) == 1 \u0026\u0026 object.spec.parentRefs[0].name == params.data.gatewayName \u0026\u0026 object.spec.parentRefs[0].?namespace.orValue(request.namespace) == params.data.gatewayNamespace \u0026\u0026 object.spec.parentRefs[0].?sectionName.orValue('') == params.data.gatewaySection \u0026\u0026 size(object.spec.rules) == 1 \u0026\u0026 !has(object.spec.rules[0].filters) \u0026\u0026 size(object.spec.rules[0].matches) == 1 \u0026\u0026 object.spec.rules[0].matches[0].path.type == 'PathPrefix' \u0026\u0026 object.spec.rules[0].matches[0].path.value == '/v2/' + variables.id + '/' \u0026\u0026 size(object.spec.rules[0].backendRefs) == 1 \u0026\u0026 object.spec.rules[0].backendRefs[0].?kind.orValue('Service') == 'Service' \u0026\u0026 object.spec.rules[0].backendRefs[0].?group.orValue('') == '' \u0026\u0026 object.spec.rules[0].backendRefs[0].name == 'zot-' + variables.id \u0026\u0026 object.spec.rules[0].backendRefs[0].?namespace.orValue(request.namespace) == object.metadata.?labels[?'registry.in-cloud.io/namespace'].orValue('') \u0026\u0026 object.spec.rules[0].backendRefs[0].?port.orValue(0) == 8080)"
       message: "a registry route is /v2/\u003cid\u003e/ on the registry host and gateway, to Service zot-\u003cid\u003e:8080 of its tenant"

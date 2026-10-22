@@ -232,7 +232,7 @@ def cmd_probe_instance(render, site_file, vars_file, probes_on):
                     f"{name} timeoutSeconds {probe.get('timeoutSeconds', 1)} is longer than the {READY_DEADLINE_S} s zot deadline of /readyz")
         p.check(lp.get("timeoutSeconds") == 1, f"liveness timeoutSeconds is set to 1 s explicitly, got {lp.get('timeoutSeconds')}")
         p.check(all(k not in zot for k in ("readinessProbe", "livenessProbe", "startupProbe")),
-                "zot carries no probe of its own: it listens on the pod loopback, out of kubelet reach")
+                "zot carries no probe of its own: a hung zot makes the pod Unready, it is not restarted")
         p.check("ports" not in zot, "zot exposes no port")
         p.check(zot["args"] == ["serve", "/vault/secrets/config.json"], "zot reads the rendered config")
         vols = {x["name"]: x for x in pod["volumes"]}
