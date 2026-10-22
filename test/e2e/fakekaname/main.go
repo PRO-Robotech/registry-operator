@@ -19,8 +19,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/PRO-Robotech/registry-operator/internal/iamproxy"
 	"github.com/PRO-Robotech/registry-operator/internal/kaname/kanametest"
+	"github.com/PRO-Robotech/registry-operator/internal/tlsfile"
 )
 
 func main() {
@@ -38,7 +38,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	pool, err := iamproxy.CAPool(clientCA)
+	pool, err := tlsfile.CAPool(clientCA)
 	if err != nil {
 		log.Fatal(err)
 	}

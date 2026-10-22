@@ -6,11 +6,8 @@ package kaname
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"fmt"
-	"os"
-	"sync"
 	"time"
 
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
@@ -19,6 +16,8 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
+
+	"github.com/PRO-Robotech/registry-operator/internal/tlsfile"
 )
 
 // ClientConfig — подключение к внутреннему листенеру kaname.
@@ -142,64 +141,18 @@ func Classify(err error) error {
 // MutualTLS — клиентская конфигурация mTLS: лист перечитывается с диска
 // при смене файла, центр доверия — только объявленный.
 func MutualTLS(certFile, keyFile, caFile, serverName string) (*tls.Config, error) {
-	pool, err := loadPool(caFile)
+	pool, err := tlsfile.CAPool(caFile)
 	if err != nil {
 		return nil, err
 	}
-	kp := &keyPair{certFile: certFile, keyFile: keyFile}
-	if _, err := kp.get(); err != nil {
-		return nil, err
+	kp, err := tlsfile.NewKeyPair(certFile, keyFile)
+	if err != nil {
+		return nil, fmt.Errorf("client certificate: %w", err)
 	}
 	return &tls.Config{
-		MinVersion: tls.VersionTLS12,
-		RootCAs:    pool,
-		ServerName: serverName,
-		GetClientCertificate: func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
-			return kp.get()
-		},
+		MinVersion:           tls.VersionTLS12,
+		RootCAs:              pool,
+		ServerName:           serverName,
+		GetClientCertificate: kp.ClientCertificate,
 	}, nil
-}
-
-func loadPool(caFile string) (*x509.CertPool, error) {
-	b, err := os.ReadFile(caFile) //nolint:gosec // путь — конфигурация оператора.
-	if err != nil {
-		return nil, fmt.Errorf("read CA: %w", err)
-	}
-	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM(b) {
-		return nil, fmt.Errorf("CA file %s holds no certificate", caFile)
-	}
-	return pool, nil
-}
-
-// keyPair — лист с диска, перечитываемый при смене времени изменения.
-type keyPair struct {
-	certFile, keyFile string
-
-	mu      sync.Mutex
-	cert    *tls.Certificate
-	modTime time.Time
-}
-
-func (k *keyPair) get() (*tls.Certificate, error) {
-	st, err := os.Stat(k.certFile)
-	if err != nil {
-		return nil, fmt.Errorf("stat client certificate: %w", err)
-	}
-	k.mu.Lock()
-	defer k.mu.Unlock()
-	if k.cert != nil && st.ModTime().Equal(k.modTime) {
-		return k.cert, nil
-	}
-	c, err := tls.LoadX509KeyPair(k.certFile, k.keyFile)
-	if err != nil {
-		if k.cert != nil {
-			// Ротация пишет пару не атомарно: пока новая пара не сошлась,
-			// действует прежняя.
-			return k.cert, nil
-		}
-		return nil, fmt.Errorf("load client certificate: %w", err)
-	}
-	k.cert, k.modTime = &c, st.ModTime()
-	return k.cert, nil
 }

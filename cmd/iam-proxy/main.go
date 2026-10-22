@@ -26,6 +26,7 @@ import (
 	"google.golang.org/grpc/credentials"
 
 	"github.com/PRO-Robotech/registry-operator/internal/iamproxy"
+	"github.com/PRO-Robotech/registry-operator/internal/tlsfile"
 )
 
 func main() {
@@ -59,7 +60,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	pool, err := iamproxy.CAPool(cfg.KanameCAFile)
+	pool, err := tlsfile.CAPool(cfg.KanameCAFile)
 	if err != nil {
 		return err
 	}

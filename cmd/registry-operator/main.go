@@ -15,7 +15,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"sync"
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -35,6 +34,7 @@ import (
 	"github.com/PRO-Robotech/registry-operator/internal/kaname"
 	"github.com/PRO-Robotech/registry-operator/internal/ledger"
 	"github.com/PRO-Robotech/registry-operator/internal/ocidigest"
+	"github.com/PRO-Robotech/registry-operator/internal/tlsfile"
 )
 
 func main() {
@@ -121,18 +121,18 @@ func run() error {
 		Now: time.Now,
 		Log: slog.New(slog.NewJSONHandler(os.Stderr, nil)).With("component", "enrollment"),
 	}
-	certs := &servingCert{certFile: e.CertFile, keyFile: e.KeyFile}
-	if _, err := certs.get(nil); err != nil {
+	certs, err := tlsfile.NewKeyPair(e.CertFile, e.KeyFile)
+	if err != nil {
 		return fmt.Errorf("refusing to start: enrollment certificate: %w", err)
 	}
-	if err := mgr.Add(&enrollmentRunnable{server: &http.Server{
+	if err := mgr.Add(&enrollmentRunnable{enroll: srv, server: &http.Server{
 		Addr:              e.Listen,
 		Handler:           srv.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      e.RequestTimeout.Duration + 5*time.Second,
 		MaxHeaderBytes:    16 << 10,
-		TLSConfig:         &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: certs.get},
+		TLSConfig:         &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: certs.ServerCertificate},
 	}}); err != nil {
 		return err
 	}
@@ -146,9 +146,11 @@ func run() error {
 }
 
 // enrollmentRunnable — эндпоинт заявок на каждой реплике (не только у
-// лидера): запись описи защищена версией объекта, а не единственностью
-// писателя.
+// лидера): запись описи и темп новых репозиториев защищены версией объекта
+// описи, а не единственностью писателя. При остановке — дождаться идущих
+// заявок, затем идущих компенсаций.
 type enrollmentRunnable struct {
+	enroll *enroll.Server
 	server *http.Server
 }
 
@@ -161,42 +163,14 @@ func (r *enrollmentRunnable) Start(ctx context.Context) error {
 	case <-ctx.Done():
 		shutdown, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
-		return r.server.Shutdown(shutdown)
+		if err := r.server.Shutdown(shutdown); err != nil {
+			return err
+		}
+		return r.enroll.Drain(shutdown)
 	case err := <-errc:
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
 		return err
 	}
-}
-
-// servingCert — серверный сертификат с диска, перечитываемый при смене
-// (cert-manager ротирует его на месте).
-type servingCert struct {
-	certFile, keyFile string
-
-	mu      sync.Mutex
-	cert    *tls.Certificate
-	modTime time.Time
-}
-
-func (s *servingCert) get(*tls.ClientHelloInfo) (*tls.Certificate, error) {
-	st, err := os.Stat(s.certFile)
-	if err != nil {
-		return nil, err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.cert != nil && st.ModTime().Equal(s.modTime) {
-		return s.cert, nil
-	}
-	c, err := tls.LoadX509KeyPair(s.certFile, s.keyFile)
-	if err != nil {
-		if s.cert != nil {
-			return s.cert, nil
-		}
-		return nil, err
-	}
-	s.cert, s.modTime = &c, st.ModTime()
-	return s.cert, nil
 }
