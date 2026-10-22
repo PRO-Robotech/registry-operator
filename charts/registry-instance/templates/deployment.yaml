@@ -1,0 +1,139 @@
+{{- $base := include "ri.base" . }}
+{{- $caPath := printf "/etc/registry/ca/%s" .Values.site.vault.caConfigMap.key }}
+---
+# zot слушает только 127.0.0.1:5000 и хранит данные только в S3; снаружи пода
+# доступен лишь сайдкар svc-registry (--mode=sidecar): он проверяет JWT kaname и право
+# на registry.registries:<id> по mTLS. config.json и клиентский сертификат рендерит
+# vault-agent: init — до старта zot (повторяет, пока лист с ключами бакета не появится),
+# сайдкар vault-agent — продлевает сертификат. Сетевая политика пода — волной раньше.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $base | toJson }}
+  labels:
+    {{- include "ri.labels" (dict "root" . "component" "workload") | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "ri.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "ri.labels" (dict "root" . "component" "workload") | nindent 8 }}
+      annotations:
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/agent-init-first: "true"
+        vault.hashicorp.com/agent-pre-populate: "true"
+        vault.hashicorp.com/agent-pre-populate-only: "false"
+        vault.hashicorp.com/service: {{ .Values.site.vault.address | toJson }}
+        vault.hashicorp.com/ca-cert: {{ $caPath | toJson }}
+        vault.hashicorp.com/auth-path: {{ printf "auth/%s" .Values.vault.authMount | toJson }}
+        vault.hashicorp.com/role: {{ .Values.vault.role | toJson }}
+        vault.hashicorp.com/agent-service-account-token-volume-name: vault-token
+        vault.hashicorp.com/agent-copy-volume-mounts: sidecar
+        vault.hashicorp.com/agent-run-as-same-user: "true"
+        vault.hashicorp.com/template-config-exit-on-retry-failure: "true"
+        vault.hashicorp.com/agent-requests-cpu: {{ .Values.site.resources.vaultAgent.requests.cpu | toJson }}
+        vault.hashicorp.com/agent-requests-mem: {{ .Values.site.resources.vaultAgent.requests.memory | toJson }}
+        vault.hashicorp.com/agent-limits-cpu: {{ .Values.site.resources.vaultAgent.limits.cpu | toJson }}
+        vault.hashicorp.com/agent-limits-mem: {{ .Values.site.resources.vaultAgent.limits.memory | toJson }}
+        vault.hashicorp.com/agent-inject-secret-config.json: {{ .Values.vault.secretPath | toJson }}
+        vault.hashicorp.com/agent-inject-template-config.json: {{ include "ri.zotConfigTemplate" . | toJson }}
+        vault.hashicorp.com/agent-inject-perms-config.json: "0440"
+        vault.hashicorp.com/agent-inject-secret-tls.pem: {{ printf "%s/issue/%s" .Values.site.vault.pki.mount .Values.site.vault.pki.role | toJson }}
+        vault.hashicorp.com/agent-inject-template-tls.pem: {{ include "ri.tlsTemplate" . | toJson }}
+        vault.hashicorp.com/agent-inject-perms-tls.pem: "0440"
+    spec:
+      serviceAccountName: {{ $base | toJson }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: zot
+          image: {{ include "ri.image" .Values.site.images.zot | toJson }}
+          imagePullPolicy: IfNotPresent
+          args:
+            - serve
+            - /vault/secrets/config.json
+          volumeMounts:
+            - name: scratch
+              mountPath: /var/lib/zot
+            - name: tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources: {{ .Values.site.resources.zot | toJson }}
+        - name: sidecar
+          image: {{ include "ri.image" .Values.site.images.sidecar | toJson }}
+          imagePullPolicy: IfNotPresent
+          args:
+            - --mode=sidecar
+            - --listen=:8080
+            - --upstream=http://127.0.0.1:5000
+            - {{ printf "--registry-id=%s" .Values.instance.id | toJson }}
+            - {{ printf "--kaname-check-address=%s" .Values.site.kaname.checkAddress | toJson }}
+            - {{ printf "--kaname-jwks-url=%s" .Values.site.kaname.jwksURL | toJson }}
+            - {{ printf "--audience=%s" .Values.site.sidecar.audience | toJson }}
+            - --client-cert=/vault/secrets/tls.pem
+            - {{ printf "--ca-file=%s" $caPath | toJson }}
+          ports:
+            - name: proxy
+              containerPort: 8080
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: proxy
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: proxy
+            periodSeconds: 20
+            failureThreshold: 3
+          volumeMounts:
+            - name: ca
+              mountPath: /etc/registry/ca
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources: {{ .Values.site.resources.sidecar | toJson }}
+      volumes:
+        - name: scratch
+          emptyDir:
+            sizeLimit: {{ .Values.site.resources.scratchSizeLimit | toJson }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: ca
+          configMap:
+            name: {{ .Values.site.vault.caConfigMap.name | toJson }}
+            items:
+              - key: {{ .Values.site.vault.caConfigMap.key | toJson }}
+                path: {{ .Values.site.vault.caConfigMap.key | toJson }}
+        - name: vault-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: {{ .Values.site.vault.tokenAudience | toJson }}
+                  expirationSeconds: 3600
+                  path: token

@@ -1,0 +1,20 @@
+apiVersion: v2
+name: registry-instance
+description: >-
+  The zot workload of one on-demand registry: its service account, pod network
+  policy, Service and Deployment (zot on S3 with the svc-registry authorization
+  sidecar). Installed through an Addon written by registry-operator, which owns
+  the bucket, the Vault role, the IAM robot and binding and the edge route.
+type: application
+version: 1.0.0
+appVersion: "v2.1.20"
+kubeVersion: ">=1.30.0-0"
+home: https://github.com/PRO-Robotech/registry-operator
+sources:
+  - https://github.com/PRO-Robotech/registry-operator/tree/main/charts/registry-instance
+keywords:
+  - registry
+  - zot
+  - oci
+annotations:
+  artifacthub.io/license: Apache-2.0

@@ -1,0 +1,29 @@
+---
+# Слой заказа (priority 0): переносит Addon.spec.variables в values чарта
+# registry-instance. Текст слоя — фиксированный файл чарта: только .Variables из
+# перечня и функции toJson и regexMatch; нечисловая эпоха остаётся строкой, и схема
+# registry-instance отвергает рендер. Значения переменных пишет registry-operator после
+# своей проверки.
+apiVersion: addons.in-cloud.io/v1alpha1
+kind: AddonValue
+metadata:
+  name: {{ printf "%s-order" .Values.addonName | toJson }}
+  labels:
+    {{- include "rp.labels" . | nindent 4 }}
+    addons.in-cloud.io/addon: {{ .Values.addonName | toJson }}
+    addons.in-cloud.io/values: order
+spec:
+  values: {{ .Files.Get "files/order-values.tmpl" | toJson }}
+---
+# Слой площадки (priority 10): константы site.* — адреса Vault и kaname, PKI, образы по
+# digest, сеть, край. Данные без исполняемого текста.
+apiVersion: addons.in-cloud.io/v1alpha1
+kind: AddonValue
+metadata:
+  name: {{ printf "%s-site" .Values.addonName | toJson }}
+  labels:
+    {{- include "rp.labels" . | nindent 4 }}
+    addons.in-cloud.io/addon: {{ .Values.addonName | toJson }}
+    addons.in-cloud.io/values: site
+spec:
+  values: {{ dict "site" .Values.site | toYaml | include "rp.inertValues" | toJson }}

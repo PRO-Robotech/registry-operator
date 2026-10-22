@@ -1,0 +1,103 @@
+# Чарт ставит ровно рабочую нагрузку zot одного регистри: ServiceAccount, сетевую
+# политику пода, Service и Deployment. Бакет, роль Vault, учётку и выдачу kaname и
+# маршрут края заводит и ведёт registry-operator сам; сюда он передаёт только пути
+# к ним — через Addon.spec.variables и слой заказа платформы (README.md, «Контракт»).
+#
+# Обязательное здесь пусто: рендер без слоя заказа и слоя площадки отказывает по
+# values.schema.json, молчаливых умолчаний нет.
+
+# Заказ Registry: пишет registry-operator (слой заказа, priority 0).
+instance:
+  # id заказа: ^[a-z0-9]{6,20}$, не начинается с «reg»; неизменяем.
+  id: ""
+  # login — metadata.namespace заказа Registry (namespace арендатора).
+  login: ""
+  # uid заказа Registry: метка owner-uid на каждом объекте.
+  registryUID: ""
+  # Эпоха синхронизации: оператор увеличивает её, чтобы Argo CD повторил исчерпанную
+  # синхронизацию (источник Application меняется). В объекты не печатается.
+  syncEpoch: 0
+
+# Бакет заказа: значения из S3BucketClaim (status.bucketName, status.endpoint, spec.region).
+storage:
+  bucket: ""
+  # Только https: zot ходит в S3 с TLS.
+  endpoint: ""
+  region: ""
+
+# Vault заказа: значения из VaultClaim и S3BucketClaim, которые ведёт оператор.
+vault:
+  # Полный путь чтения листа KV v2 с ключами бакета:
+  # <kvMount>/data/<secretsPrefix>/namespaces/<login>/apps/docker-registry/zot-<id>.
+  secretPath: ""
+  # Существующий mount kubernetes-auth (без «auth/»).
+  authMount: ""
+  # Роль на этом mount; равна zot-<id>.
+  role: ""
+
+# Константы площадки: слой площадки платформы (priority 10).
+site:
+  vault:
+    # Адрес Vault для vault-agent; только https.
+    address: ""
+    # ConfigMap с CA Vault и kaname в namespace заказа (раздаёт платформа).
+    caConfigMap:
+      name: ""
+      key: ca.crt
+    # Аудитория projected-токена SA пода для входа vault-agent; равна audience роли.
+    tokenAudience: vault
+    # PKI клиентского сертификата сайдкара (mTLS к kaname :9091).
+    pki:
+      mount: ""
+      role: ""
+      commonName: ""
+      uriSAN: ""
+  kaname:
+    # host:9091 внутреннего листенера kaname (Check по mTLS).
+    checkAddress: ""
+    # https://host:9097/... — набор ключей kaname (JWKS).
+    jwksURL: ""
+  sidecar:
+    # Аудитория JWT kaname, которую принимает сайдкар.
+    audience: registry
+  images:
+    zot:
+      repository: ghcr.io/project-zot/zot-linux-amd64
+      tag: v2.1.20
+      digest: sha256:95a837a0afacf5b7edc0c92493f04beee6891989b8d2fd50a00cf65a1e6d4fd5
+    # Образ svc-registry; запускается с --mode=sidecar.
+    sidecar:
+      repository: ""
+      tag: ""
+      digest: ""
+  edge:
+    # Прокси Envoy Gateway своего Gateway — единственный сетевой источник входа в под.
+    proxy:
+      namespace: ""
+      gateway:
+        name: ""
+        namespace: ""
+  network:
+    # true — разрешить вход kubelet (entity host) на :8080 для проб готовности.
+    # Нужен там, где политика узла не пропускает пробы сама; по умолчанию закрыт.
+    allowKubeletProbes: false
+    dns:
+      namespace: ""
+      labels: {}
+    # Пиры выхода: {fqdn, ports} | {namespace, labels, ports} | {cidr, ports}.
+    # Выход в S3 выводится из storage.endpoint и здесь не задаётся.
+    vault: []
+    # Порты kaname — только 9091 (Check) и 9097 (JWKS).
+    kaname: []
+  resources:
+    zot:
+      requests: {cpu: 100m, memory: 256Mi}
+      limits: {memory: 1Gi}
+    sidecar:
+      requests: {cpu: 20m, memory: 32Mi}
+      limits: {memory: 128Mi}
+    vaultAgent:
+      requests: {cpu: 10m, memory: 32Mi}
+      limits: {cpu: 100m, memory: 64Mi}
+    # Временное zot (метаданные, загрузки до выгрузки в S3); данные — только в S3.
+    scratchSizeLimit: 2Gi
