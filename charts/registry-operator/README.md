@@ -27,7 +27,8 @@ Deployment, два Certificate cert-manager и NetworkPolicy: вход на эн
   `registry_repository`);
 - метки namespace арендатора `kaname.in-cloud.io/project-id` и
   `kaname.in-cloud.io/account-id`;
-- маршрут заказа в namespace края ссылается на Service в namespace арендатора — нужен
-  ReferenceGrant на namespace арендатора (объект платформы);
+- маршрут заказа в namespace края ссылается на Service в namespace арендатора — ReferenceGrant
+  (from: HTTPRoute namespace края, to: Service `zot-<id>`) ставит чарт `registry-instance`
+  вместе с рабочей нагрузкой; оператор пишет ровно шесть видов и ReferenceGrant не пишет;
 - центр серверного сертификата эндпоинта заявок — в namespace арендатора, для iam-proxy
   (`--enroll-ca`).
