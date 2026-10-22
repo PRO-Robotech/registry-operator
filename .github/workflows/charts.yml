@@ -1,5 +1,6 @@
 # Чарты registry-instance и registry-platform: lint, рендер с golden-сверкой и пробами
-# формы, схемы, ct lint, пробы политик допуска на kind; публикация OCI — на теги.
+# формы, схемы, ct lint, пробы политик допуска на kind, манифест модуля через загрузчик
+# kaname; публикация OCI — на теги.
 name: charts
 
 on:
@@ -60,6 +61,11 @@ jobs:
         env:
           SCHEMAS: ${{ runner.temp }}/schemas
         run: charts/tests/run.sh
+      # Третье место namespace маршрутов края — конфиг оператора (config/samples). На ветке
+      # без него шаг пропущен и виден пропущенным, а не зелёным.
+      - name: route namespace agrees with the operator config
+        if: hashFiles('config/samples/operator-config.yaml') != ''
+        run: python3 charts/tests/lib.py route-namespace .
       - name: rendered output
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -112,10 +118,50 @@ jobs:
           charts/tests/crds.sh "$RUNNER_TEMP/crds"
           CRDS="$RUNNER_TEMP/crds" charts/tests/admission/run.sh
 
+  kaname-manifest:
+    name: module manifest through the kaname loader
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      # Ревизия kaname, чей код судит доставку: та же, что образ стенда prorobotech/kaname:main-93ad1b88.
+      KANAME_REF: 93ad1b885469c79f284b9fc629f86fe3dde81a97
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: azure/setup-helm@b9e51907a09c216f16ebe8536097933489208112 # v4.3.0
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - name: delivery from the render
+        run: |
+          python -m pip install --disable-pip-version-check pyyaml==6.0.2
+          helm template registry-platform charts/registry-platform --kube-version 1.30.0 \
+            -f charts/tests/cases/platform-default.yaml -f charts/tests/cases/platform-all.yaml > "$RUNNER_TEMP/platform.yaml"
+          python3 charts/tests/lib.py manifest "$RUNNER_TEMP/platform.yaml" "$RUNNER_TEMP/delivery"
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: PRO-Robotech/kaname
+          ref: ${{ env.KANAME_REF }}
+          path: kaname
+          persist-credentials: false
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: kaname/go.mod
+          cache-dependency-path: kaname/go.sum
+      # Пакеты загрузки kaname внутренние: проба исполняется пакетом внутри его модуля.
+      - name: go test in kaname
+        env:
+          REGOP_DELIVERY: ${{ runner.temp }}/delivery
+        run: |
+          mkdir -p kaname/internal/registryoperatorprobe
+          cp charts/tests/kaname/testdata/manifest_load_test.go kaname/internal/registryoperatorprobe/
+          cd kaname && go test -count=1 -v ./internal/registryoperatorprobe/
+
   publish:
     name: publish OCI
     if: startsWith(github.ref, 'refs/tags/registry-instance-') || startsWith(github.ref, 'refs/tags/registry-platform-')
-    needs: [render, ct, admission]
+    needs: [render, ct, admission, kaname-manifest]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:

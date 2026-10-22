@@ -11,6 +11,8 @@
   probe-instance <render.yaml> <site.yaml> <order-vars.yaml> <probes-on:true|false>
   probe-platform <render.yaml> <default|all>
   no-lua <path>...                      — ни в одном файле нет проверок здоровья Lua для Argo CD
+  manifest <platform.yaml> <outdir>     — каталог доставки kaname из ConfigMap модуля в рендере
+  route-namespace <repo-root>           — namespace маршрутов края одинаков в чарте и в конфиге оператора
 """
 import json
 import pathlib
@@ -106,6 +108,10 @@ def containers(dep):
 
 
 README = pathlib.Path(__file__).resolve().parents[1] / "registry-instance" / "README.md"
+
+# Срок, с которым /readyz iam-proxy спрашивает /readyz zot (readyTimeout в
+# internal/iamproxy/readiness.go): пробы готовности чарта ждут дольше него.
+READY_DEADLINE_S = 2
 
 
 def contract_flags():
@@ -219,6 +225,12 @@ def cmd_probe_instance(render, site_file, vars_file, probes_on):
         p.check(sp.get("httpGet") == {"path": "/readyz", "port": "health"}
                 and sp.get("periodSeconds", 0) * sp.get("failureThreshold", 0) >= 300,
                 "startup waits for zot behind /readyz at least 300 s before liveness starts")
+        # /readyz прокси сам спрашивает zot со сроком READY_DEADLINE_S: срок пробы kubelet
+        # обязан быть больше, иначе медленный, но живой zot снимает под по таймауту пробы.
+        for name, probe in (("readiness", rp), ("startup", sp)):
+            p.check(probe.get("timeoutSeconds", 1) > READY_DEADLINE_S,
+                    f"{name} timeoutSeconds {probe.get('timeoutSeconds', 1)} is longer than the {READY_DEADLINE_S} s zot deadline of /readyz")
+        p.check(lp.get("timeoutSeconds") == 1, f"liveness timeoutSeconds is set to 1 s explicitly, got {lp.get('timeoutSeconds')}")
         p.check(all(k not in zot for k in ("readinessProbe", "livenessProbe", "startupProbe")),
                 "zot carries no probe of its own: it listens on the pod loopback, out of kubelet reach")
         p.check("ports" not in zot, "zot exposes no port")
@@ -353,6 +365,11 @@ def cmd_probe_platform(render, mode):
             paths = [m["path"] for r in d["spec"]["rules"] for m in r["matches"]]
             p.check(len(paths) == 1 and paths[0]["type"] == "Exact" and paths[0]["value"] in ("/v2/", "/iam/token"),
                     f"shared route {d['metadata']['name']} matches one exact path")
+    # Публичность — один механизм, флаг --public iam-proxy: выдач kaname с системными
+    # классами anonymous и authenticated платформа не рендерит и не разрешает.
+    p.check("AccessBinding" not in kinds, f"no AccessBinding is rendered, got {kinds.get('AccessBinding')}")
+    text_all = yaml.safe_dump_all(ds)
+    p.check("systemClass" not in text_all, "no subject of a system class anywhere in the render")
     cm, m = manifest_of(ds)
     p.check(cm is not None, "kaname module manifest of registry is rendered")
     if cm is not None:
@@ -423,6 +440,10 @@ def cmd_probe_platform(render, mode):
             if d["kind"] == "ConfigMap" and d["metadata"]["name"] == "registry-platform-admission":
                 p.check("registrar" not in d["data"] and "pkiPolicy" not in d["data"],
                         "no second registry writer and no data-plane PKI in the parameters")
+                allowed = d["data"].get("allowedRoles", "").split(",")
+                declared = sorted(r["id"] for r in (m or {}).get("roles", []))
+                p.check(bool(declared) and set(allowed) <= set(declared),
+                        f"V1 lets the operator grant only roles of the module manifest: allowed {allowed}, declared {declared}")
     return p.done()
 
 
@@ -441,6 +462,47 @@ def cmd_no_lua(paths):
     return p.done() if seen else 1
 
 
+def cmd_manifest(platform, outdir):
+    """Каталог доставки kaname: ключ ConfigMap модуля, помеченного меткой доставки."""
+    cms = [d for d in docs(platform) if d["kind"] == "ConfigMap"
+           and d["metadata"].get("labels", {}).get("kaname.in-cloud.io/module-manifest") == "true"]
+    if len(cms) != 1 or list(cms[0].get("data", {})) != ["registry.manifest.yaml"]:
+        print(f"manifest: one ConfigMap with the delivery key registry.manifest.yaml expected, got {len(cms)}")
+        return 1
+    out = pathlib.Path(outdir)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "registry.manifest.yaml").write_text(cms[0]["data"]["registry.manifest.yaml"], encoding="utf-8")
+    print(f"manifest: {out / 'registry.manifest.yaml'} from ConfigMap {cms[0]['metadata']['name']}")
+    return 0
+
+
+def cmd_route_namespace(root):
+    """Три места namespace маршрутов края: площадка экземпляра, допуск V3, оператор.
+
+    Чарт сверяет первые два при рендере (admission.yaml). Третье — конфиг оператора
+    (policy.route.namespaces) и шаблон маршрута (ObservedHTTPRouteTemplate.spec.targetNamespace)
+    из config/samples оператора; без них сверять нечего, и это код 3, а не зелёное.
+    """
+    p = Probe("route-namespace")
+    root = pathlib.Path(root)
+    op_cfg = root / "config/samples/operator-config.yaml"
+    route_tmpl = root / "config/samples/templates/httproute.yaml"
+    if not op_cfg.is_file() or not route_tmpl.is_file():
+        print(f"route-namespace: NOT EXECUTED: {op_cfg.relative_to(root)} or {route_tmpl.relative_to(root)} is absent")
+        return 3
+    with open(root / "charts/tests/cases/platform-default.yaml", encoding="utf-8") as f:
+        site = yaml.safe_load(f)["site"]["edge"]["routeNamespace"]
+    with open(root / "charts/tests/cases/platform-all.yaml", encoding="utf-8") as f:
+        admission = yaml.safe_load(f)["admission"]["routeNamespace"]
+    with open(op_cfg, encoding="utf-8") as f:
+        operator = yaml.safe_load(f)["policy"]["route"]["namespaces"]
+    target = docs(route_tmpl)[0]["spec"]["targetNamespace"]
+    p.check(site == admission, f"site.edge.routeNamespace {site} equals admission.routeNamespace {admission}")
+    p.check(operator == [site], f"operator policy.route.namespaces {operator} is exactly [{site}]")
+    p.check(target == site, f"route template targetNamespace {target} equals {site}")
+    return p.done()
+
+
 def main(argv):
     cmd, args = argv[1], argv[2:]
     if cmd == "layers":
@@ -457,6 +519,10 @@ def main(argv):
         return cmd_probe_platform(*args)
     if cmd == "no-lua":
         return cmd_no_lua(args)
+    if cmd == "manifest":
+        return cmd_manifest(*args)
+    if cmd == "route-namespace":
+        return cmd_route_namespace(*args)
     print(__doc__)
     return 64
 

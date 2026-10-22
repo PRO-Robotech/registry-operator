@@ -197,10 +197,18 @@ cases:
   - {name: v1-operator-binds-unknown-role, policy: v1-registry-iam, as: operator, verb: create, expect: deny, object: *binding, set: {spec.roleRef.name: registry.owner}}
   - {name: v1-operator-binds-foreign-target, policy: v1-registry-iam, as: operator, verb: create, expect: deny, object: *binding, set: {spec.target.resources: [{type: registry.registries, id: xyz789}]}}
   - {name: v1-operator-binds-pusher, policy: v1-registry-iam, as: operator, verb: create, expect: allow, object: *binding}
+  # Публичность — только флаг --public iam-proxy: выдачи системным классам оператор не пишет.
+  - {name: v1-operator-binds-anonymous, policy: v1-registry-iam, as: operator, verb: create, expect: deny, object: *binding, set: {spec.subjects: [{systemClass: {name: anonymous}}]}}
+  - {name: v1-operator-binds-authenticated, policy: v1-registry-iam, as: operator, verb: create, expect: deny, object: *binding, set: {spec.subjects: [{systemClass: {name: authenticated}}]}}
+  - {name: v1-operator-binds-public-read-role, policy: v1-registry-iam, as: operator, verb: create, expect: deny, object: *binding, set: {spec.roleRef.name: registry.public.read}}
   # V3 — маршрут заказа.
   - {name: v3-stranger-creates-route, policy: v3-registry-route, as: stranger, verb: create, expect: deny, object: *route}
   - {name: v3-operator-routes-foreign-path, policy: v3-registry-route, as: operator, verb: create, expect: deny, object: *route, set: {spec.rules: [{matches: [{path: {type: PathPrefix, value: /v2/xyz789/}}], backendRefs: [{group: "", kind: Service, name: zot-abc123, namespace: cust01, port: 8080}]}]}}
   - {name: v3-operator-routes-own-path, policy: v3-registry-route, as: operator, verb: create, expect: allow, object: *route}
+  # Маршрут судится и по ссылке на Service zot-*, а не только по своему имени: ReferenceGrant
+  # экземпляра открывает zot-<id> любому HTTPRoute namespace края.
+  - {name: v3-stranger-routes-zot-under-another-name, policy: v3-registry-route, as: stranger, verb: create, expect: deny, object: *route, rename: edge-web}
+  - {name: v3-stranger-routes-elsewhere-under-another-name, policy: v3-registry-route, as: stranger, verb: create, expect: allow, object: *route, rename: edge-web, set: {spec.rules: [{matches: [{path: {type: PathPrefix, value: /web/}}], backendRefs: [{group: "", kind: Service, name: web, namespace: registry-edge, port: 8080}]}]}}
   # V4 — поды SA zot-*.
   - {name: v4-stranger-creates-zot-pod, policy: v4-registry-zot-pods, as: stranger, verb: create, expect: deny, object: *zotpod}
   - {name: v4-replicaset-creates-zot-pod, policy: v4-registry-zot-pods, as: rs, verb: create, expect: allow, object: *zotpod}
