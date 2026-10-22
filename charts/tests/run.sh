@@ -171,6 +171,8 @@ step no-lua py no-lua "$PLATFORM" "$INSTANCE" "$OUT/platform-default.yaml" "$OUT
 # 8. Метки инжектора: все случаи и их законные близнецы видны в общей переписи.
 step injector-labels python3 -I "$T/injector-labels.py" "$INSTANCE" "$OUT/layers/abc123.order.yaml" "$OUT/layers/site.yaml"
 cat "$OUT/injector-labels.log"
+step root-pool python3 -I "$T/root-pool.py" "$PLATFORM" "$INSTANCE" "$pdef" "$pall" "$OUT/layers/abc123.order.yaml" "$OUT/layers/site.yaml"
+cat "$OUT/root-pool.log"
 
 echo "charts: passed $pass, failed $fail"
 [ "$fail" -eq 0 ] && [ "$pass" -gt 0 ]

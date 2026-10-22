@@ -72,6 +72,8 @@ sharedRoutes:
     sectionName: https
   host: ""
   apiRoot:
+    # Site-owned Service для private Pods одной site.routingGroup; backend задаёт его имя/namespace.
+    privatePool: false
     backend:
       namespace: ""
       name: ""

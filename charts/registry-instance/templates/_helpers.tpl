@@ -58,6 +58,10 @@ ri.check сверяет пути заказа с его id и login: под чи
 {{- end -}}
 
 {{- define "ri.labels" -}}
+{{- if .root.Values.site.routingGroup }}
+registry.in-cloud.io/routing-group: {{ .root.Values.site.routingGroup | toJson }}
+registry.in-cloud.io/root-membership: {{ ternary "public" "private" .root.Values.instance.public | toJson }}
+{{ end -}}
 app.kubernetes.io/name: zot
 app.kubernetes.io/instance: {{ include "ri.base" .root | toJson }}
 app.kubernetes.io/part-of: registry
@@ -72,7 +76,7 @@ registry.in-cloud.io/owner-uid: {{ .root.Values.instance.registryUID | toJson }}
 {{- define "ri.injectorLabels" -}}
 {{- $builtIn := include "ri.labels" (dict "root" . "component" "workload") | fromYaml -}}
 {{- range $key, $value := .Values.site.vault.injectorLabels -}}
-{{- if hasKey $builtIn $key -}}
+{{- if or (hasKey $builtIn $key) (has $key (list "registry.in-cloud.io/routing-group" "registry.in-cloud.io/root-membership")) -}}
 {{- fail (printf "site.vault.injectorLabels conflicts with built-in label %q" $key) -}}
 {{- end -}}
 {{ printf "\n%s: %s" ($key | toJson) ($value | toJson) }}

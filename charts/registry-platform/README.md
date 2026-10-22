@@ -26,6 +26,25 @@
 | `ValidatingAdmissionPolicy` V1–V15 с привязками и параметрами | **выключено** («пока без») | ограды писателей помимо оператора |
 | `AppProject <projectPrefix><login>` | **выключено** («пока без») | проект Argo CD на арендатора |
 
+Для нескольких частных Registry в одном namespace включите
+`sharedRoutes.apiRoot.privatePool: true` и задайте `site.routingGroup` — непустую
+DNS-метку площадки для одного host и одного контракта Kaname (URL, issuer,
+audience и CA). `sharedRoutes.apiRoot.backend` задаёт имя, namespace и порт
+стабильного Service, который создаст этот чарт. Он выбирает существующие
+private proxy Pods этой группы; публичные Registry и другие группы исключены.
+Service и общий HTTPRoute принадлежат площадке, поэтому удаление одного заказа
+не удаляет корень `/v2/`. Service выбирает Pods только своего namespace;
+между namespace этот пул не балансирует. Не используйте имя Service экземпляра
+`zot-<id>` для общего Service.
+
+Метки `registry.in-cloud.io/routing-group` и `registry.in-cloud.io/root-membership`
+выводятся чартом и запрещены в `site.vault.injectorLabels`, в том числе когда
+группа не задана. Площадка должна выдавать одну группу только экземплярам с
+одинаковым контрактом аутентификации. Проверка версии сохраняет `401 Basic`
+без credentials, `200` для годных credentials и `401` для негодных: анонимный
+`200` здесь позволил бы Docker login завершиться без проверки пароля.
+По умолчанию пул выключен и существующая ссылка на backend сохраняется.
+
 Проверок здоровья Lua для Argo CD нет: готовность заказа считает registry-operator по статусам
 дочерних ресурсов.
 

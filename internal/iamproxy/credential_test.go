@@ -375,7 +375,7 @@ func TestOpaqueProtectedRequestRevocation(t *testing.T) {
 	}
 	request := func(want int) {
 		t.Helper()
-		r := httptest.NewRequest(http.MethodGet, "/v2/team/app/manifests/latest", nil)
+		r := httptest.NewRequest(http.MethodGet, "/v2/one/team/app/manifests/latest", nil)
 		r.SetBasicAuth("credential-one", raw)
 		r.Header.Set("Cookie", "credential="+raw)
 		out := httptest.NewRecorder()

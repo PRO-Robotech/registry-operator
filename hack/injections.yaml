@@ -231,8 +231,8 @@ injections:
     tests: [TestReadiness_NeedsTheKeySetAndAReadyZot]
   - name: basic-password-is-not-a-token
     file: internal/iamproxy/proxy.go
-    old: "if _, password, ok := r.BasicAuth(); ok {"
-    new: "if _, password, ok := r.BasicAuth(); ok && false {"
+    old: "if username, password, ok := r.BasicAuth(); ok {"
+    new: "if username, password, ok := r.BasicAuth(); ok && false {"
     package: ./internal/iamproxy/
     tests: [TestProxy_RightsTable, TestProxy_VersionCheck]
   - name: challenge-for-a-token-issuance

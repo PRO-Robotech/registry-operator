@@ -39,6 +39,8 @@ vault:
 
 # Константы площадки: слой площадки платформы (priority 10).
 site:
+  # Необязательная routingGroup: DNS label площадки для одного host/authority.
+  # Задаётся только площадкой; общий private root выбирает Pods этой группы.
   # ConfigMap в namespace заказа с CA, которым подписаны Vault, публичный API kaname и
   # эндпоинт регистрации registry-operator (раздаёт платформа).
   caBundle:

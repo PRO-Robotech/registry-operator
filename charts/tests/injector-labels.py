@@ -61,7 +61,13 @@ def positive(labels):
 def negative(labels, twin, reserved=None):
     result = render(labels)
     assert result.returncode != 0, 'invalid input rendered successfully'
-    assert 'injectorLabels' in result.stderr, result.stderr
+    if isinstance(labels, dict) and reserved is None and 'invalid propertyName' in result.stderr:
+        assert "values don't meet the specifications of the schema" in result.stderr, result.stderr
+        assert len(labels) == 1, 'key rejection must have one mutation'
+        key = next(iter(labels))
+        assert f"invalid propertyName '{key}'" in result.stderr, result.stderr
+    else:
+        assert 'injectorLabels' in result.stderr, result.stderr
     if reserved:
         assert reserved in result.stderr, result.stderr
     positive(twin)

@@ -31,8 +31,9 @@ func TestOptionalPairMigrationRefusesOwnedIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := set.RegistryTemplate.DeepCopy()
-	service.Name = "pair-service-v1"
-	service.Spec.TemplateName = "pair-service"
+	service.Name = "zot-v4"
+	service.Spec.TemplateName = "zot"
+	service.Spec.Version = "v4"
 	service.Spec.Templates.IamServiceAccount = nil
 	service.Spec.Templates.IamAccessBinding = nil
 	if err := k8s.Create(ctx(), service); err != nil {
@@ -40,7 +41,7 @@ func TestOptionalPairMigrationRefusesOwnedIdentity(t *testing.T) {
 	}
 	eventually(t, wait, "switch template", func() error {
 		r := registry(t, ns, id)
-		r.Spec.TemplateRef = api.TemplateRef{Name: "pair-service", Version: "v1"}
+		r.Spec.TemplateRef.Version = "v4"
 		return k8s.Update(ctx(), r)
 	})
 	eventually(t, wait, "migration refused", func() error {

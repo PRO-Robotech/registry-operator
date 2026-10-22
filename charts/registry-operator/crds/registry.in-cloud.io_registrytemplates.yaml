@@ -210,7 +210,8 @@ spec:
                 - vaultClaim
                 type: object
                 x-kubernetes-validations:
-                - message: identity and access templates must be supplied together or both omitted
+                - message: identity and access templates must be supplied together
+                    or both omitted
                   rule: has(self.iamServiceAccount) == has(self.iamAccessBinding)
               version:
                 description: Version — ревизия линии.
