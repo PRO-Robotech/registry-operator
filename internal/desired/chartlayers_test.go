@@ -37,11 +37,11 @@ type layerCensus struct {
 	files, layers, templates int
 }
 
-// render — один эталонный рендер чарта, то есть одна установка площадки:
+// goldenRender — один эталонный рендер чарта, то есть одна установка площадки:
 // её слои AddonValue и селекторы каждой её формы AddonTemplate. Слои разных
 // рендеров не смешиваются — одноимённый слой двух установок не делает
 // выбор Addon заказа двойным.
-type render struct {
+type goldenRender struct {
 	path   string
 	layers []layer
 	forms  [][]map[string]string
@@ -54,9 +54,9 @@ var templateAction = regexp.MustCompile(`\{\{.*?\}\}`)
 // platformLayers читает эталоны порознь: у каждого рендера — его слои
 // AddonValue и селекторы каждой его формы AddonTemplate (собственный ответ
 // установки на вопрос «какие слои выбирает Addon заказа»).
-func platformLayers(paths []string) (layerCensus, []render, []string) {
+func platformLayers(paths []string) (layerCensus, []goldenRender, []string) {
 	var census layerCensus
-	var renders []render
+	var renders []goldenRender
 	var findings []string
 	for _, path := range paths {
 		raw, err := os.ReadFile(path) //nolint:gosec // путь — эталоны чарта в дереве.
@@ -65,7 +65,7 @@ func platformLayers(paths []string) (layerCensus, []render, []string) {
 			continue
 		}
 		census.files++
-		r := render{path: path}
+		r := goldenRender{path: path}
 		for _, doc := range bytes.Split(raw, []byte("\n---")) {
 			var obj struct {
 				Kind     string `json:"kind"`
@@ -113,7 +113,7 @@ func platformLayers(paths []string) (layerCensus, []render, []string) {
 
 // judgeRenders — сверка Addon заказа с каждым рендером по отдельности:
 // слои и формы одной установки. Рендер без формы — находка, а не молчание.
-func judgeRenders(ours []map[string]string, renders []render) []string {
+func judgeRenders(ours []map[string]string, renders []goldenRender) []string {
 	var findings []string
 	for _, r := range renders {
 		if len(r.forms) == 0 {
@@ -280,20 +280,20 @@ func TestAddon_RendersAreJudgedOneByOne(t *testing.T) {
 	}
 	form := []map[string]string{sel("registry-instance", "order"), sel("registry-instance", "site")}
 	ours := []map[string]string{sel("registry-instance", "site"), sel("registry-instance", "order")}
-	two := []render{
+	two := []goldenRender{
 		{path: "platform-default.yaml", layers: layers, forms: [][]map[string]string{form}},
 		{path: "platform-all.yaml", layers: layers, forms: [][]map[string]string{form}},
 	}
 	if f := judgeRenders(ours, two); len(f) != 0 {
 		t.Fatalf("lawful twin: two installations with the same layers: %v", f)
 	}
-	doubled := []render{{path: "platform-doubled.yaml", layers: append(slices.Clone(layers), layers[2]), forms: [][]map[string]string{form}}}
+	doubled := []goldenRender{{path: "platform-doubled.yaml", layers: append(slices.Clone(layers), layers[2]), forms: [][]map[string]string{form}}}
 	if f := judgeRenders(ours, doubled); !slices.ContainsFunc(f, func(s string) bool {
 		return strings.HasPrefix(s, "platform-doubled.yaml: ") && strings.Contains(s, "selects 2 platform layers [registry-instance-site registry-instance-site]")
 	}) {
 		t.Fatalf("a layer rendered twice in one installation is silent: %v", f)
 	}
-	formless := []render{{path: "platform-formless.yaml", layers: layers}}
+	formless := []goldenRender{{path: "platform-formless.yaml", layers: layers}}
 	if f := judgeRenders(ours, formless); !slices.Contains(f, "platform-formless.yaml: no AddonTemplate form to judge the order Addon against") {
 		t.Fatalf("a render without a form is silent: %v", f)
 	}
