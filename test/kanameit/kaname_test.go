@@ -548,7 +548,7 @@ type step struct {
 var schemes = []string{"bearer", "basic"}
 
 // expect — каждый шаг обеими схемами; дошёл ли запрос до zot — ровно при
-// 200. settle — ограниченный повтор положительного шага на только что
+// 200; расхождение — t.Errorf, таблица идёт дальше. settle — ограниченный повтор положительного шага на только что
 // выданном праве (выдача материализуется асинхронно); отрицательный шаг не
 // повторяется никогда.
 func (p *proxy) expect(t *testing.T, s subject, settle bool, steps ...step) {
@@ -564,8 +564,11 @@ func (p *proxy) expect(t *testing.T, s subject, settle bool, steps ...step) {
 					break
 				}
 				if !settle || st.want != http.StatusOK || time.Now().After(deadline) {
+					// Перепись, а не первый отказ: шаг помечен, таблица идёт
+					// дальше, и прогон называет все расхождения разом.
 					p.explain(t, s, st.method, st.path)
-					t.Fatalf("%s %s (%s, %s): %d (zot reached %v), want %d", s.name, st.what, scheme, st.method+" "+st.path, resp.StatusCode, reached, st.want)
+					t.Errorf("%s %s (%s, %s): %d (zot reached %v), want %d", s.name, st.what, scheme, st.method+" "+st.path, resp.StatusCode, reached, st.want)
+					break
 				}
 				time.Sleep(time.Second)
 			}
