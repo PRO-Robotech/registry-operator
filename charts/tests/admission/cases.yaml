@@ -178,7 +178,8 @@ objects:
       project: registry-cust01
       destination: {server: https://kubernetes.default.svc, namespace: cust01}
       source: {repoURL: oci://ghcr.io/pro-robotech/charts/registry-instance, chart: registry-instance, targetRevision: 1.0.0}
-
+# Создаётся до проб от имени платформы (администратор kind входит в platformUsers и
+# platformGroups пробы, values-probe.yaml).
 # Создаётся до проб от имени платформы (группа system:masters входит в platformGroups пробы).
 setup: [*zotsa, *addon, *project, *app, *marked]
 
