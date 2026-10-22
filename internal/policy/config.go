@@ -66,8 +66,9 @@ type SecretsPolicy struct {
 type IdentityPolicy struct {
 	// AllowedRoles — роли, которые выдача вправе называть для учётки заказа.
 	AllowedRoles []string `json:"allowedRoles"`
-	// SystemClassRoles — роли, которые вправе получать системные классы
-	// (anonymous, authenticated): только публичное чтение.
+	// SystemClassRoles — роли, которые вправе получать системный класс
+	// anonymous, и только на публичном заказе (spec.public): только
+	// публичное чтение. Класс authenticated не получает ничего.
 	SystemClassRoles []string `json:"systemClassRoles,omitempty"`
 	// TargetType — тип ресурса цели выдачи: registry.registries.
 	TargetType string `json:"targetType"`

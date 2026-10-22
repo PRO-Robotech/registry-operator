@@ -476,8 +476,14 @@ func (c *Config) checkAccessBinding(v *Violations, o Order, u *unstructured.Unst
 			}
 		case sub.SystemClass != nil && sub.ServiceAccountRef == nil:
 			systemClass = true
-			if sub.SystemClass.Name != "anonymous" && sub.SystemClass.Name != "authenticated" {
-				v.add(f+".systemClass.name", "must be anonymous or authenticated")
+			// Системный класс — подстановка «любой»: законен только аноним и
+			// только на публичном заказе. authenticated открыл бы частный
+			// регистри каждому вошедшему субъекту любого арендатора.
+			switch {
+			case sub.SystemClass.Name != "anonymous":
+				v.add(f+".systemClass.name", "must be anonymous: a grant to every authenticated subject opens the registry to all tenants")
+			case !o.Public:
+				v.add(f+".systemClass.name", "anonymous may hold a role only on a public registry (spec.public)")
 			}
 		default:
 			v.add(f, "must be exactly one of serviceAccountRef or systemClass")
