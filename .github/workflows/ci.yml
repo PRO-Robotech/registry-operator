@@ -138,6 +138,30 @@ jobs:
     needs: [test]
     steps:
       - uses: actions/checkout@v4
+      - name: Source provenance before runtime checks
+        run: |
+          python3 -I - before <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+
+          def git(*args):
+              return subprocess.check_output(['git', *args], text=True).strip()
+
+          phase = sys.argv[1]
+          assert phase in ('before', 'after'), phase
+          head = git('rev-parse', 'HEAD')
+          assert head == os.environ['GITHUB_SHA'], 'source HEAD differs from event SHA'
+          assert not git('status', '--porcelain', '--untracked-files=no'), 'tracked source changed'
+          if phase == 'before':
+              assert not git('ls-files', '--others', '--exclude-standard'), 'initial checkout has untracked files'
+          print('OPERATOR_SOURCE_V1 ' + json.dumps({
+              'phase': phase, 'head': head, 'tree': git('rev-parse', 'HEAD^{tree}'),
+              'tracked_clean': True, 'run_id': int(os.environ['GITHUB_RUN_ID']),
+              'run_attempt': int(os.environ['GITHUB_RUN_ATTEMPT']), 'job': os.environ['GITHUB_JOB'],
+          }, sort_keys=True))
+          PY
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -182,6 +206,30 @@ jobs:
           E2E_CHART_HOST: kind-registry:5000
           E2E_CHART_DIGEST: ${{ steps.img.outputs.chart }}
         run: REGOP_TEST_CRDS="$PWD/bin/crds" go test -tags=e2e -count=1 -timeout 30m ./test/e2e/ -v
+      - name: Source provenance after runtime checks
+        run: |
+          python3 -I - after <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+
+          def git(*args):
+              return subprocess.check_output(['git', *args], text=True).strip()
+
+          phase = sys.argv[1]
+          assert phase in ('before', 'after'), phase
+          head = git('rev-parse', 'HEAD')
+          assert head == os.environ['GITHUB_SHA'], 'source HEAD differs from event SHA'
+          assert not git('status', '--porcelain', '--untracked-files=no'), 'tracked source changed'
+          if phase == 'before':
+              assert not git('ls-files', '--others', '--exclude-standard'), 'initial checkout has untracked files'
+          print('OPERATOR_SOURCE_V1 ' + json.dumps({
+              'phase': phase, 'head': head, 'tree': git('rev-parse', 'HEAD^{tree}'),
+              'tracked_clean': True, 'run_id': int(os.environ['GITHUB_RUN_ID']),
+              'run_attempt': int(os.environ['GITHUB_RUN_ATTEMPT']), 'job': os.environ['GITHUB_JOB'],
+          }, sort_keys=True))
+          PY
       - name: operator log
         if: failure()
         run: kubectl -n registry-system logs deploy/registry-operator --tail=300 || true
