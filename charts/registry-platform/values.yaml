@@ -131,6 +131,7 @@ admission:
     - registry.puller
     - registry.pusher
     - registry.admin
+    - registry.public.read
   # Форма ресурсов Vault заказа.
   vault:
     config: ""

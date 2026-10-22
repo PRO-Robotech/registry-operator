@@ -69,7 +69,7 @@ data:
   "checks" (list
     (dict "expression" (printf "variables.isOp || variables.isPlatform || (request.operation == 'UPDATE' && %s && %s)" (include "rp.same" "spec") (include "rp.same" "metadata.labels")) "message" "zot-* IAM objects are written only by registry-operator; other writers may change only metadata outside labels")
     (dict "expression" "request.operation == 'DELETE' || !variables.isOp || (variables.id != '' && variables.o.metadata.name.startsWith('zot-' + variables.id + '-') && variables.o.metadata.?labels[?'registry.in-cloud.io/namespace'].orValue('') == request.namespace)" "message" "a zot-<id>-* IAM object carries its id and namespace labels")
-    (dict "expression" "request.resource.resource != 'accessbindings' || request.operation == 'DELETE' || !variables.isOp || (object.spec.roleRef.name in params.data.allowedRoles.split(',') && size(object.spec.target.resources) == 1 && object.spec.target.resources[0].type == 'registry.registries' && object.spec.target.resources[0].id == variables.id && object.spec.subjects.all(s, has(s.serviceAccountRef) && s.serviceAccountRef.name.startsWith('zot-' + variables.id + '-')))" "message" "a registry binding grants an allowed role on its own registry to its own robots only"))) }}
+    (dict "expression" "request.resource.resource != 'accessbindings' || request.operation == 'DELETE' || !variables.isOp || (object.spec.roleRef.name in params.data.allowedRoles.split(',') && size(object.spec.target.resources) == 1 && object.spec.target.resources[0].type == 'registry.registries' && object.spec.target.resources[0].id == variables.id && object.spec.subjects.all(s, !has(s.serviceAccountRef) || s.serviceAccountRef.name.startsWith('zot-' + variables.id + '-')))" "message" "a registry binding grants an allowed role on its own registry to its own robots only"))) }}
 
 {{- /* V2: статус заказа и резерва — только registry-operator, единственный их писатель. */}}
 {{- $policies = append $policies (dict "id" "v2" "name" "registry-status"
@@ -82,7 +82,7 @@ data:
 HTTPRoute namespace края, и маршрут под другим именем обошёл бы допуск. */}}
 {{- $policies = append $policies (dict "id" "v3" "name" "registry-route"
   "rules" (list (dict "apiGroups" (list "gateway.networking.k8s.io") "resources" (list "httproutes") "operations" (list "CREATE" "UPDATE" "DELETE")))
-  "match" "(request.operation == 'DELETE' ? oldObject : object).metadata.name.startsWith('zot-') || (request.operation == 'DELETE' ? oldObject : object).spec.?rules.orValue([]).exists(r, r.?backendRefs.orValue([]).exists(b, b.name.startsWith('zot-')))"
+  "match" "(request.operation == 'DELETE' ? oldObject : object).metadata.name.startsWith('zot-')"
   "vars" (list (dict "name" "id" "expression" "(request.operation == 'DELETE' ? oldObject : object).metadata.?labels[?'registry.in-cloud.io/id'].orValue('')"))
   "checks" (list
     (dict "expression" (printf "variables.isOp || variables.isPlatform || (request.operation == 'UPDATE' && %s && %s)" (include "rp.same" "spec") (include "rp.same" "metadata.labels")) "message" "routes named zot-* or to a Service zot-* are written only by registry-operator")

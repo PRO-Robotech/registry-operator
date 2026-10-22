@@ -1,0 +1,12 @@
+{{- if not .Values.admission.enabled }}
+---
+apiVersion: iam.kaname.in-cloud.io/v1alpha1
+kind: AccessBinding
+metadata:
+  name: zot-inject-public
+  namespace: cust01
+spec:
+  subjects: [{systemClass: {name: anonymous}}]
+  roleRef: {name: registry.puller}
+  target: {resources: [{type: registry.registries, id: abc123}]}
+{{- end }}
