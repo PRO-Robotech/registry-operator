@@ -121,9 +121,9 @@ type Server struct {
 // Учёт проверок токенов по источнику: темп и запас одного адреса, предел
 // числа учитываемых адресов.
 const (
-	sourceRate  rate.Limit = 10
-	sourceBurst            = 20
-	maxSources             = 4096
+	sourceRate  = rate.Limit(10)
+	sourceBurst = 20
+	maxSources  = 4096
 )
 
 // Компенсация записи, опоздавшей к закрытию: срок всех попыток и отступы
