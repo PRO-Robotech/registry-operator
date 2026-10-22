@@ -97,12 +97,15 @@ type Fake struct {
 	failNext    []codes.Code
 	refuse      map[string]bool
 	unavailable map[string]bool
+	// landed — запись объекта применяется, а ответ теряется: вызывающий
+	// видит Unavailable (вызов дошёл, срок истёк раньше ответа).
+	landed map[string]bool
 }
 
 // New — двойник; allowedSAN — URI SAN листа, которому разрешена запись
 // (spiffe://<td>/ns/<ns>/sa/kacho-registry).
 func New(allowedSAN string) *Fake {
-	return &Fake{objects: map[string]Object{}, tokens: map[string]string{}, refuse: map[string]bool{}, unavailable: map[string]bool{}, allowedSAN: allowedSAN}
+	return &Fake{objects: map[string]Object{}, tokens: map[string]string{}, refuse: map[string]bool{}, unavailable: map[string]bool{}, landed: map[string]bool{}, allowedSAN: allowedSAN}
 }
 
 // FailNext — следующие вызовы внутреннего листенера получат эти коды.
@@ -125,6 +128,14 @@ func (f *Fake) SetUnavailable(object string, on bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.unavailable[object] = on
+}
+
+// SetLanded — регистрация объекта применяется, но отвечает Unavailable,
+// пока флаг не снят: исход вызова для вызывающего неизвестен.
+func (f *Fake) SetLanded(object string, on bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.landed[object] = on
 }
 
 // Objects — снимок зеркала.
@@ -254,6 +265,9 @@ func (f *Fake) applyRegister(req *iamv1.RegisterResourceRequest) (*iamv1.Registe
 	f.objects[req.GetObject()] = Object{
 		Subject: req.GetSubjectId(), Relation: req.GetRelation(), ParentChain: slices.Clone(req.GetParentChain()),
 		ParentProjectID: req.GetParentProjectId(), ParentAccountID: req.GetParentAccountId(), Version: v,
+	}
+	if f.landed[req.GetObject()] {
+		return nil, status.Error(codes.Unavailable, "deadline exceeded after the write")
 	}
 	return &iamv1.RegisterResourceResponse{}, nil
 }

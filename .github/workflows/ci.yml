@@ -87,6 +87,15 @@ jobs:
           helm template t charts/registry-operator -n registry-system -f charts/registry-operator/ci/test-values.yaml > rendered.yaml
           yq 'select(.kind == "ConfigMap") | .data["config.yaml"]' rendered.yaml > config.yaml
           go run ./hack/checkconfig config.yaml
+      - run: pip install --quiet pyyaml==6.0.2
+      - name: the enrollment endpoint admits only zot pods
+        run: |
+          python3 hack/check-netpol.py rendered.yaml
+          # Инъекции: без политики и с открытым источником проверка обязана упасть.
+          yq 'select(.kind != "NetworkPolicy")' rendered.yaml > no-policy.yaml
+          if python3 hack/check-netpol.py no-policy.yaml; then echo "check-netpol is blind to a missing policy"; exit 1; fi
+          yq '(select(.kind == "NetworkPolicy") | .spec.ingress[] | select(.ports[].port == "enrollment") | .from) = [{"namespaceSelector": {}}]' rendered.yaml > open.yaml
+          if python3 hack/check-netpol.py open.yaml; then echo "check-netpol is blind to an open source"; exit 1; fi
       - name: refusals have their reason
         run: |
           set +e

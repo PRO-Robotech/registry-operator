@@ -7,10 +7,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -369,4 +375,349 @@ func (h hook) Register(ctx context.Context, r kaname.Registration) error {
 
 func (h hook) Unregister(ctx context.Context, r kaname.Registration) error {
 	return h.inner.Unregister(ctx, r)
+}
+
+// replica — вторая реплика оператора над тем же API-сервером: свой процесс,
+// своя память, общая опись.
+func (e *env) replica() *httptest.Server {
+	s := &enroll.Server{
+		Reader: e.c, Ledger: &ledger.Store{Client: e.c, Reader: e.c}, Kaname: registrarFunc{e},
+		Reviewer: reviewer{"tok-zot": {"cust01", "zot-abc123"}},
+		Audience: audience, WorkloadName: func(id string) string { return "zot-" + id },
+		Limits: e.limits, Now: func() time.Time { return e.now }, Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	srv := httptest.NewServer(s.Handler())
+	e.t.Cleanup(srv.Close)
+	return srv
+}
+
+// send — заявка без t.Fatal: годится для конкурирующих горутин.
+func send(c *http.Client, base, token, repo, subject string) (int, string, error) {
+	body, _ := json.Marshal(api.Request{Repository: repo, Subject: subject})
+	req, err := http.NewRequest(http.MethodPost, base+"/v1/registries/abc123/repositories", bytes.NewReader(body))
+	if err != nil {
+		return 0, "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := c.Do(req)
+	if err != nil {
+		return 0, "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var out api.Response
+	_ = json.NewDecoder(resp.Body).Decode(&out)
+	return resp.StatusCode, out.Outcome, nil
+}
+
+// fromSource — клиент, чьи соединения уходят с данного адреса петли.
+func fromSource(ip string) *http.Client {
+	d := &net.Dialer{LocalAddr: &net.TCPAddr{IP: net.ParseIP(ip)}}
+	return &http.Client{Transport: &http.Transport{DialContext: d.DialContext, MaxIdleConnsPerHost: 64}}
+}
+
+// Поток мусорных токенов с одного источника исчерпывает только учёт этого
+// источника: заявки рабочей нагрузки с другого адреса проходят.
+func TestEnroll_UnauthenticatedFloodFromOneSourceDoesNotStarveOthers(t *testing.T) {
+	e := newEnv(t, nil, defaultLimits())
+	flood := fromSource("127.0.0.2")
+	const n = 2000
+	var wg sync.WaitGroup
+	var limited atomic.Int64
+	jobs := make(chan int)
+	for range 16 {
+		wg.Go(func() {
+			for range jobs {
+				code, _, err := send(flood, e.srv.URL, "garbage", "team/app", "service_account:sva1")
+				if err == nil && code == http.StatusTooManyRequests {
+					limited.Add(1)
+				}
+			}
+		})
+	}
+	for i := range n {
+		jobs <- i
+	}
+	close(jobs)
+	wg.Wait()
+	if limited.Load() == 0 {
+		t.Fatalf("%d unauthenticated requests from one source were never limited", n)
+	}
+	legit := fromSource("127.0.0.1")
+	for i, want := range []int{http.StatusCreated, http.StatusOK, http.StatusOK} {
+		code, outcome, err := send(legit, e.srv.URL, "tok-zot", "team/app", "service_account:sva1")
+		if err != nil || code != want {
+			t.Fatalf("workload request %d after the flood: %d %s %v (want %d)", i, code, outcome, err, want)
+		}
+	}
+}
+
+// Темп новых репозиториев — на регистри во всём кластере, а не на реплику:
+// вторая реплика видит заявку первой.
+func TestEnroll_RateIsHeldAcrossReplicas(t *testing.T) {
+	l := defaultLimits()
+	l.RatePerMinute, l.Burst = 1, 1
+	e := newEnv(t, nil, l)
+	other := e.replica()
+	c := fromSource("127.0.0.1")
+	if code, outcome, err := send(c, e.srv.URL, "tok-zot", "a", "service_account:sva1"); err != nil || code != http.StatusCreated {
+		t.Fatalf("first replica: %d %s %v", code, outcome, err)
+	}
+	if code, outcome, err := send(c, other.URL, "tok-zot", "b", "service_account:sva1"); err != nil || code != http.StatusTooManyRequests || outcome != api.OutcomeLimited {
+		t.Fatalf("second replica over the cluster rate: %d %s %v", code, outcome, err)
+	}
+	// Близнец: темп восстановился — та же заявка на второй реплике проходит.
+	e.now = e.now.Add(time.Minute)
+	if code, outcome, err := send(c, other.URL, "tok-zot", "b", "service_account:sva1"); err != nil || code != http.StatusCreated {
+		t.Fatalf("second replica after the rate refilled: %d %s %v", code, outcome, err)
+	}
+}
+
+// flaky — Registrar, чьи первые failures снятий отвечают «недоступен».
+type flaky struct {
+	inner    kaname.Registrar
+	before   func()
+	mu       sync.Mutex
+	failures int
+}
+
+func (f *flaky) Register(ctx context.Context, r kaname.Registration) error {
+	if f.before != nil {
+		f.before()
+	}
+	return f.inner.Register(ctx, r)
+}
+
+func (f *flaky) Unregister(ctx context.Context, r kaname.Registration) error {
+	f.mu.Lock()
+	fail := f.failures > 0
+	if fail {
+		f.failures--
+	}
+	f.mu.Unlock()
+	if fail {
+		return fmt.Errorf("%w: injected", kaname.ErrUnavailable)
+	}
+	return f.inner.Unregister(ctx, r)
+}
+
+func (e *env) closeRegistration() error {
+	_, err := (&ledger.Store{Client: e.c, Reader: e.c}).Mutate(context.Background(), "abc123", func(res *registryv1alpha1.RegistryIDReservation) error {
+		if res.Status.Registration.ClosingAt != nil {
+			return ledger.ErrNoChange
+		}
+		at := metav1.NewTime(e.now)
+		res.Status.Registration.ClosingAt = &at
+		return nil
+	})
+	return err
+}
+
+// Компенсация заявки, опоздавшей к закрытию, повторяется, пока IAM не
+// ответит: разовый отказ снятия не оставляет репозиторий в IAM.
+func TestEnroll_CompensationIsRetriedUntilIAMAnswers(t *testing.T) {
+	e := newEnv(t, nil, defaultLimits())
+	f := &flaky{inner: e.kn, failures: 2}
+	f.before = func() {
+		if err := e.closeRegistration(); err != nil {
+			t.Error(err)
+		}
+	}
+	e.kn = f
+	if code, _ := e.post("tok-zot", "abc123", "team/app", "service_account:sva1"); code != http.StatusGone {
+		t.Fatalf("got %d", code)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, ok := e.fake.Objects()["registry_repository:abc123/team/app"]; !ok {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the repository outlived a compensation that failed twice")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// Опись под конкурирующими писателями: три случая заказа ревью.
+func TestEnroll_ConcurrentEnrollmentsOfOneNewRepository(t *testing.T) {
+	e := newEnv(t, nil, defaultLimits())
+	replicas := []string{e.srv.URL, e.replica().URL, e.replica().URL}
+	c := fromSource("127.0.0.1")
+	const n = 9
+	statuses := make([]int, n)
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := range n {
+		wg.Go(func() {
+			<-start
+			statuses[i], _, errs[i] = send(c, replicas[i%len(replicas)], "tok-zot", "team/app", fmt.Sprintf("user:usr%d", i))
+		})
+	}
+	close(start)
+	wg.Wait()
+	created, conflict := 0, 0
+	for i := range n {
+		switch {
+		case errs[i] != nil:
+			t.Fatalf("request %d: %v", i, errs[i])
+		case statuses[i] == http.StatusCreated:
+			created++
+		case statuses[i] == http.StatusConflict:
+			conflict++
+		default:
+			t.Fatalf("request %d: %d", i, statuses[i])
+		}
+	}
+	if created != 1 || conflict != n-1 {
+		t.Fatalf("created %d, conflict %d of %d", created, conflict, n)
+	}
+	if l := e.ledger(); len(l) != 1 || !l[0].Registered {
+		t.Fatalf("ledger %+v", l)
+	}
+}
+
+func TestEnroll_ConcurrentEnrollmentsAtTheLastFreeSlot(t *testing.T) {
+	l := defaultLimits()
+	l.MaxRepositories = 4
+	e := newEnv(t, func(_ *registryv1alpha1.Registry, res *registryv1alpha1.RegistryIDReservation) {
+		old := metav1.NewTime(time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC))
+		for _, name := range []string{"x", "y", "z"} {
+			res.Status.Repositories = append(res.Status.Repositories, registryv1alpha1.RegisteredRepository{Name: name, EnrolledBy: "user:usr0", EnrolledAt: old, Registered: true})
+		}
+	}, l)
+	replicas := []string{e.srv.URL, e.replica().URL}
+	c := fromSource("127.0.0.1")
+	const n = 8
+	statuses := make([]int, n)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := range n {
+		wg.Go(func() {
+			<-start
+			statuses[i], _, _ = send(c, replicas[i%len(replicas)], "tok-zot", fmt.Sprintf("r%d", i), "service_account:sva1")
+		})
+	}
+	close(start)
+	wg.Wait()
+	created, limited := 0, 0
+	for i, code := range statuses {
+		switch code {
+		case http.StatusCreated:
+			created++
+		case http.StatusTooManyRequests:
+			limited++
+		default:
+			t.Fatalf("request %d: %d", i, code)
+		}
+	}
+	if created != 1 || limited != n-1 || len(e.ledger()) != 4 {
+		t.Fatalf("created %d, limited %d, ledger %d", created, limited, len(e.ledger()))
+	}
+}
+
+// Заявки идут, пока снятие закрывает регистри: в IAM не остаётся
+// репозитория вне описи, и снятие по описи забирает всё.
+func TestEnroll_ConcurrentEnrollmentsAndClosingLeaveNothingOutsideTheLedger(t *testing.T) {
+	e := newEnv(t, nil, defaultLimits())
+	replicas := []string{e.srv.URL, e.replica().URL}
+	c := fromSource("127.0.0.1")
+	const n = 8
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := range n {
+		wg.Go(func() {
+			<-start
+			_, _, _ = send(c, replicas[i%len(replicas)], "tok-zot", fmt.Sprintf("r%d", i), "service_account:sva1")
+		})
+	}
+	// Снятие без срока слива: закрыть, затем снимать опись, пока заявки
+	// идут, — опоздавшая запись в IAM остаётся только компенсации.
+	done := make(chan struct{})
+	var teardown sync.WaitGroup
+	teardown.Go(func() {
+		<-start
+		if err := e.closeRegistration(); err != nil {
+			t.Error(err)
+			return
+		}
+		for {
+			e.unregisterLedger(t)
+			select {
+			case <-done:
+				return
+			case <-time.After(time.Millisecond):
+			}
+		}
+	})
+	close(start)
+	wg.Wait()
+	close(done)
+	teardown.Wait()
+	repos := func() []string {
+		var out []string
+		for obj := range e.fake.Objects() {
+			if name, ok := strings.CutPrefix(obj, "registry_repository:abc123/"); ok {
+				out = append(out, name)
+			}
+		}
+		return out
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		inLedger := map[string]bool{}
+		for _, r := range e.ledger() {
+			inLedger[r.Name] = true
+		}
+		var outside []string
+		for _, name := range repos() {
+			if !inLedger[name] {
+				outside = append(outside, name)
+			}
+		}
+		if len(outside) == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("repositories in IAM outside the ledger: %v", outside)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	e.unregisterLedger(t)
+	if left := repos(); len(left) != 0 {
+		t.Fatalf("teardown by the ledger left %v in IAM", left)
+	}
+}
+
+// unregisterLedger — шаг снятия по описи: снять в IAM каждый репозиторий
+// описи и убрать снятые из описи.
+func (e *env) unregisterLedger(t *testing.T) {
+	cur := &registryv1alpha1.RegistryIDReservation{}
+	if err := e.c.Get(context.Background(), types.NamespacedName{Name: "abc123"}, cur); err != nil {
+		t.Error(err)
+		return
+	}
+	version := kaname.Version(time.Date(2026, 10, 22, 8, 0, 0, 0, time.UTC), 1)
+	var removed []string
+	for _, r := range cur.Status.Repositories {
+		reg := kaname.RepositoryRegistration("abc123", r.Name, kaname.Scope{Project: "prj1", Account: "acc1"}, version)
+		if err := e.fake.Direct().Unregister(context.Background(), reg); err != nil {
+			t.Error(err)
+			return
+		}
+		removed = append(removed, r.Name)
+	}
+	_, err := (&ledger.Store{Client: e.c, Reader: e.c}).Mutate(context.Background(), "abc123", func(res *registryv1alpha1.RegistryIDReservation) error {
+		n := len(res.Status.Repositories)
+		res.Status.Repositories = slices.DeleteFunc(res.Status.Repositories, func(x registryv1alpha1.RegisteredRepository) bool {
+			return slices.Contains(removed, x.Name)
+		})
+		if len(res.Status.Repositories) == n {
+			return ledger.ErrNoChange
+		}
+		return nil
+	})
+	if err != nil {
+		t.Error(err)
+	}
 }

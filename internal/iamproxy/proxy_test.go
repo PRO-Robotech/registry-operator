@@ -514,6 +514,52 @@ func TestNewVerifier_RefusesAPlaintextKeySet(t *testing.T) {
 	}
 }
 
+// Проверка версии протокола (GET /v2/) отвечает сам прокси, не zot:
+// предъявившему годный токен и анониму публичного регистри — 200 с версией
+// протокола; анониму частного и негодному токену — 401 с вызовом за токеном
+// без области (клиент проверяет учётные данные при входе).
+func TestProxy_VersionCheck(t *testing.T) {
+	for _, c := range []struct {
+		name      string
+		public    bool
+		token     string
+		status    int
+		challenge bool
+	}{
+		{"anonymous on a private registry", false, "", http.StatusUnauthorized, true},
+		{"valid token on a private registry", false, "valid", http.StatusOK, false},
+		{"invalid token", false, "garbage", http.StatusUnauthorized, true},
+		{"anonymous on a public registry", true, "", http.StatusOK, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e := newEnv(t, c.public)
+			tok := c.token
+			if tok == "valid" {
+				tok = e.token("user:usr1", nil)
+			}
+			for _, m := range []string{http.MethodGet, http.MethodHead} {
+				resp := e.do(m, "/v2/", tok)
+				if resp.StatusCode != c.status {
+					t.Fatalf("%s /v2/: %d, want %d", m, resp.StatusCode, c.status)
+				}
+				if v := resp.Header.Get("Docker-Distribution-Api-Version"); v != "registry/2.0" {
+					t.Fatalf("%s /v2/: API version header %q", m, v)
+				}
+				ch := resp.Header.Get("WWW-Authenticate")
+				if c.challenge != (ch != "") || strings.Contains(ch, "scope=") {
+					t.Fatalf("%s /v2/: challenge %q", m, ch)
+				}
+			}
+			if resp := e.do(http.MethodPost, "/v2/", tok); resp.StatusCode != http.StatusNotFound && resp.StatusCode != http.StatusMethodNotAllowed {
+				t.Fatalf("POST /v2/: %d", resp.StatusCode)
+			}
+			if n := e.zot.count(); n != 0 {
+				t.Fatalf("the version check reached zot %d times", n)
+			}
+		})
+	}
+}
+
 // Гигиена: учётные данные клиента в zot не уходят, тела отказов zot наружу
 // не выходят, служебные пути закрыты.
 func TestProxy_Hygiene(t *testing.T) {
@@ -542,6 +588,9 @@ func TestProxy_Hygiene(t *testing.T) {
 	if resp.StatusCode != http.StatusInternalServerError || strings.Contains(string(b), "SECRET") || strings.Contains(string(b), "/internal") {
 		t.Fatalf("zot 5xx leaked: %d %s", resp.StatusCode, b)
 	}
+	if v := resp.Header.Get("Docker-Distribution-Api-Version"); v != "registry/2.0" {
+		t.Fatalf("masked zot 5xx lost the API version header: %q", v)
+	}
 	e.zot.set(http.StatusUnauthorized, "zot auth details")
 	resp = e.do(http.MethodGet, pullPath, tok)
 	b, _ = io.ReadAll(resp.Body)
@@ -552,7 +601,7 @@ func TestProxy_Hygiene(t *testing.T) {
 
 	before := e.zot.count()
 	for _, path := range []string{"/v2/_catalog", "/v2/_zot/ext/search", "/v2/" + regID + "/_zot/ext/x", "/v2/" + otherReg + "/team/app/manifests/latest",
-		"/v2/" + regID + "/team%2Fapp/manifests/latest", "/v2/" + regID + "/team/../x/manifests/latest", "/v2/"} {
+		"/v2/" + regID + "/team%2Fapp/manifests/latest", "/v2/" + regID + "/team/../x/manifests/latest", "/v2/" + regID + "/"} {
 		if resp := e.do(http.MethodGet, path, tok); resp.StatusCode != http.StatusNotFound {
 			t.Fatalf("%s: %d", path, resp.StatusCode)
 		}

@@ -195,6 +195,41 @@ func TestPipeline_ProjectComesFromTheNamespaceAndIsPinned(t *testing.T) {
 	}
 }
 
+// Проект закрепляется подтверждением IAM, а не намерением: пока запись
+// регистри не подтверждена (вызов дошёл, ответ потерян), смена метки
+// проекта переносит намерение, и регистри встаёт под новым проектом —
+// прежняя запись снята, а не оставлена рядом.
+func TestPipeline_UnconfirmedProjectFollowsTheLabel(t *testing.T) {
+	const ns, id = "pipe10", "pipe10a"
+	tenant(t, ns, "prj10x", "acc10")
+	obj := kaname.RegistryObject(id)
+	kn.SetLanded(obj, true)
+	order(t, ns, id, nil)
+	eventually(t, wait, "registration pending under the first label", func() error {
+		reg := registry(t, ns, id)
+		if reg.Status.Registration == nil || reg.Status.Registration.Reason != registryv1alpha1.ReasonRegistrationPending {
+			return fmt.Errorf("registration %+v", reg.Status.Registration)
+		}
+		if r := reservation(t, id).Status.Registration; r == nil || r.Project != "prj10x" || r.RegisteredAt != nil {
+			return fmt.Errorf("reservation registration %+v", r)
+		}
+		return registeredInIAM(id, "prj10x")
+	})
+
+	relabel(t, ns, "prj10")
+	kn.SetLanded(obj, false)
+	eventually(t, wait, "registered under the corrected project", func() error { return registeredInIAM(id, "prj10") })
+	eventually(t, wait, "confirmed in the reservation", func() error {
+		if r := reservation(t, id).Status.Registration; r == nil || r.Project != "prj10" || r.RegisteredAt == nil {
+			return fmt.Errorf("reservation registration %+v", r)
+		}
+		return nil
+	})
+	if reg := registry(t, ns, id); reg.Status.Phase == registryv1alpha1.PhaseFailed {
+		t.Fatalf("an unconfirmed project was pinned: %+v", reg.Status.Conditions)
+	}
+}
+
 func relabel(t *testing.T, ns, project string) {
 	t.Helper()
 	eventually(t, 10*time.Second, "relabel "+ns, func() error {
