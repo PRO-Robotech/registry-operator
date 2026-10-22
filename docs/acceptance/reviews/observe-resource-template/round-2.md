@@ -17,7 +17,8 @@ review:
   static_status_note: "шапка документа (DRAFT) намеренно не правлена; вердикт — эта запись и внешнее событие"
   publication_mode: local-only   # по заданию: в дерево не коммитится
   event:
-    status: not_performed
+    status: performed
+    url: https://github.com/PRO-Robotech/registry-operator/issues/12#issuecomment-6346221292
     body: "acceptance-reviewer · ✅ принято · sha256 9cedbb99374043af31ac3073938a976689c4e657bafbf6196378854e23eb8125"
 ```
 
