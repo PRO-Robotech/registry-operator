@@ -380,13 +380,21 @@ def cmd_probe_platform(render, mode):
                 "manifest ConfigMap carries the delivery label kaname collects module manifests by")
         text = cm["data"]["registry.manifest.yaml"]
         p.check(m.get("apiVersion") == "iam/v1" and m.get("module") == "registry", "manifest of module registry, iam/v1")
-        # Типы registry_registry и registry_repository несёт канон модели образа kaname, и
-        # доставка обязана совпасть с ним побайтово: свой раздел resources либо повторил бы
-        # чужой текст, либо остановил бы kaname. Модуль объявляет только роли и личность.
-        p.check("resources" not in m, f"no resources section: the registry types are the kaname canon, got {sorted(m)}")
-        p.check(sorted(m) == ["apiVersion", "module", "roles", "seed"], f"sections apiVersion, module, roles, seed, got {sorted(m)}")
-        p.check("user:*" not in text and "notes" not in text,
-                "no wildcard subject and no model prose: public pull is the proxy flag only")
+        # Вложенное правило роли kaname судит по указателям parents ЭТОГО манифеста: без
+        # раздела resources роль с children не загружается. Раздел объявляет типы канона
+        # образа kaname, и его рендер обязан совпасть с каноном побайтово — это судит
+        # задание kaname-manifest кодом kaname; здесь — только его состав.
+        p.check(sorted(m) == ["apiVersion", "module", "resources", "roles", "seed"],
+                f"sections apiVersion, module, resources, roles, seed, got {sorted(m)}")
+        res = [(r.get("name"), r.get("objectType")) for r in m.get("resources", [])]
+        p.check(res == [("registries", "registry_registry"), ("repositories", "registry_repository")],
+                f"resources: the two canon registry types, got {res}")
+        repo_parents = next((r.get("parents") for r in m.get("resources", []) if r.get("name") == "repositories"), None)
+        p.check(repo_parents == [{"name": "parent", "type": "registry_registry"}],
+                f"a repository lies under its registry: children of a registry rule reach it, got {repo_parents}")
+        granted = yaml.safe_dump({"roles": m.get("roles"), "seed": m.get("seed")})
+        p.check("user:*" not in granted and "system_class" not in granted and "systemClass" not in granted,
+                "roles and seed name no wildcard or system-class subject: public pull is the proxy flag only")
         roles = {r["id"]: r for r in m.get("roles", [])}
         p.check(sorted(roles) == ["registry.admin", "registry.puller", "registry.pusher"], f"roles puller, pusher, admin, got {sorted(roles)}")
         want = {"registry.puller": (["get"], ["get", "list"]),

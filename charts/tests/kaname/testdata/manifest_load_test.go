@@ -161,11 +161,15 @@ func TestDeliveredRegistryManifestPassesEveryKanameStage(t *testing.T) {
 	if crep.ManifestsSeen != 1 {
 		t.Fatalf("композиция осмотрела манифестов %d, ожидался один", crep.ManifestsSeen)
 	}
-	// Раздела resources у модуля нет: типы registry_* несёт канон образа, и
-	// композиция не добавляет и не переутверждает ни одного типа.
-	if crep.ResourcesSeen != 0 || len(crep.Composed) != 0 || len(crep.Reaffirmed) != 0 {
-		t.Fatalf("композиция увидела ресурсы модуля: ресурсов %d, добавлено %v, переутверждено %v",
-			crep.ResourcesSeen, crep.Composed, crep.Reaffirmed)
+	// Раздел resources объявляет два типа канона образа: композиция обязана
+	// ПЕРЕУТВЕРДИТЬ оба побайтово — не добавить нового и не принять прежнюю
+	// редакцию переходно.
+	wantTypes := []string{"registry_registry", "registry_repository"}
+	if crep.ResourcesSeen != 2 || len(crep.Composed) != 0 || len(crep.PriorEdition) != 0 ||
+		!slices.Equal(crep.Reaffirmed, wantTypes) {
+		t.Fatalf("композиция: ресурсов %d, добавлено %v, прежняя редакция %v, переутверждено %v; "+
+			"ожидалось 2 ресурса и переутверждены %v", crep.ResourcesSeen, crep.Composed,
+			crep.PriorEdition, crep.Reaffirmed, wantTypes)
 	}
 
 	adm, err := authzmodel.Admit(composed)
