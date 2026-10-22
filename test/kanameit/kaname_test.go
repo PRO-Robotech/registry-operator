@@ -615,7 +615,7 @@ func (p *proxy) explain(t *testing.T, s subject, method, path string) {
 	for _, q := range []struct{ verb, object, action string }{
 		{iamproxy.VerbGet, repo, "registry.repositories.get"},
 		{iamproxy.VerbUpdate, repo, "registry.repositories.update"},
-		{iamproxy.VerbCreate, reg, "registry.registries.create"},
+		{iamproxy.VerbUpdate, reg, "registry.registries.update"},
 	} {
 		typ, id, _ := strings.Cut(q.object, ":")
 		body, _ := json.Marshal(map[string]any{"subject": s.principal(), "resource": map[string]any{"type": typ, "id": id},

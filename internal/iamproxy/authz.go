@@ -24,7 +24,6 @@ const (
 	VerbGet    = "v_get"
 	VerbList   = "v_list"
 	VerbUpdate = "v_update"
-	VerbCreate = "v_create"
 	VerbDelete = "v_delete"
 )
 

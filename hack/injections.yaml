@@ -69,7 +69,7 @@ injections:
     tests: [TestProxy_Hygiene]
   - name: new-repository-without-the-create-right
     file: internal/iamproxy/proxy.go
-    old: "if v := p.check(ctx, id, VerbCreate, kaname.RegistryObject(p.o.RegistryID)); v != allow {"
+    old: "if v := p.check(ctx, id, VerbUpdate, kaname.RegistryObject(p.o.RegistryID)); v != allow {"
     new: "if v := allow; v != allow {"
     package: ./internal/iamproxy/
     tests: [TestProxy_RightsTable]

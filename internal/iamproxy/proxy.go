@@ -15,7 +15,8 @@
 //     личности нет, спросить о чужом праве он не может;
 //   - pull — v_get на репозитории (каскад выдачи по регистри или по
 //     аккаунту решает kaname), push в записанный репозиторий — v_update,
-//     заведение нового — v_create на регистри и заявка оператору, где
+//     заведение нового — v_update на регистри (класса create на регистри
+//     роль модуля не несёт) и заявка оператору, где
 //     «новый» — не записанный в IAM (а не «без тегов»);
 //   - анонимное чтение — только у публичного регистри;
 //   - Authorization и Cookie клиента в zot не уходят, тела 5xx и 401 zot
@@ -331,7 +332,7 @@ func (p *Proxy) decide(r *http.Request, rt Route) (verdict, bool) {
 			verb = VerbList
 		}
 		v := p.check(ctx, *id, verb, repo)
-		if v == denied && p.check(ctx, *id, VerbCreate, kaname.RegistryObject(p.o.RegistryID)) == allow {
+		if v == denied && p.check(ctx, *id, VerbUpdate, kaname.RegistryObject(p.o.RegistryID)) == allow {
 			return unknown, false
 		}
 		return v, false
@@ -354,10 +355,11 @@ func (p *Proxy) decide(r *http.Request, rt Route) (verdict, bool) {
 }
 
 // create — запись в репозиторий, которого субъект вправе только завести:
-// право создания на регистри и заявка оператору; репозиторий, уже
-// записанный в IAM, правом создания не открывается.
+// право создания — update на регистри (роль модуля класса create на
+// регистри не несёт) — и заявка оператору; репозиторий, уже записанный в
+// IAM, правом создания не открывается.
 func (p *Proxy) create(ctx context.Context, id Identity, repository string) verdict {
-	if v := p.check(ctx, id, VerbCreate, kaname.RegistryObject(p.o.RegistryID)); v != allow {
+	if v := p.check(ctx, id, VerbUpdate, kaname.RegistryObject(p.o.RegistryID)); v != allow {
 		return v
 	}
 	key := id.Subject + "|" + repository
