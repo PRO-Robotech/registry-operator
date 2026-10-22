@@ -1,0 +1,8 @@
+# Близнец: platform-default. Меняется один факт: одна версия закреплена дважды разными digest.
+# expect: version "1.0.0" is pinned twice
+instanceChart:
+  pins:
+    - version: 1.0.0
+      digest: sha256:1d6a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8
+    - version: 1.0.0
+      digest: sha256:9d6a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8

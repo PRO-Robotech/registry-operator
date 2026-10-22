@@ -1,0 +1,4 @@
+# Близнец: базовый заказ abc123. Меняется один факт: S3 без TLS.
+# expect: storage.endpoint
+storage:
+  endpoint: http://s3.example.test

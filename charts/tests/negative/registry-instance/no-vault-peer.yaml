@@ -1,0 +1,5 @@
+# Близнец: базовая площадка. Меняется один факт: Vault недостижим по политике (пиров нет).
+# expect: site.network.vault
+site:
+  network:
+    vault: []

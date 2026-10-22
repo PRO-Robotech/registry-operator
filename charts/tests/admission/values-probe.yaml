@@ -1,0 +1,7 @@
+# Сверх platform-all: администратор kind (группа system:masters) — платформа, чтобы setup
+# проб шёл мимо политик, как онбординг площадки.
+admission:
+  authors:
+    platformGroups:
+      - platform-admins
+      - system:masters

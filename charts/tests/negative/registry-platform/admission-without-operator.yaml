@@ -1,0 +1,6 @@
+# Близнец: platform-all. Меняется один факт: политики включены без учётки оператора.
+# base: all
+# expect: admission.authors.registryOperator
+admission:
+  authors:
+    registryOperator: ""

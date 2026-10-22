@@ -1,0 +1,9 @@
+# Близнец: базовая площадка. Меняется один факт: выход к kaname на порт вне :9091/:9097.
+# expect: site.network.kaname.1.ports.0
+site:
+  network:
+    kaname:
+      - fqdn: kaname-internal.example.test
+        ports: [9091]
+      - fqdn: kaname.example.test
+        ports: [443]

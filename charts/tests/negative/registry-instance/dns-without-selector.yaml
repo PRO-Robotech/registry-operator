@@ -1,0 +1,6 @@
+# Близнец: базовая площадка. Меняется один факт: пустой селектор DNS (выбрал бы все поды namespace).
+# expect: site.network.dns.labels
+site:
+  network:
+    dns:
+      labels: null

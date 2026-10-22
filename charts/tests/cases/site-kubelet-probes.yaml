@@ -1,0 +1,4 @@
+# Площадка, чья политика узла не пропускает пробы kubelet сама: вход host на :8080 включён.
+site:
+  network:
+    allowKubeletProbes: true

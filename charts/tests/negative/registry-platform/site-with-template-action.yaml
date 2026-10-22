@@ -1,0 +1,6 @@
+# Близнец: platform-default. Меняется один факт: значение площадки несёт действие шаблона,
+# которое addons-operator исполнил бы.
+# expect: platform values must not contain "{{"
+site:
+  sidecar:
+    audience: "{{ env }}"

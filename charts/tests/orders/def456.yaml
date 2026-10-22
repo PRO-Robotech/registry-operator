@@ -1,0 +1,11 @@
+# Второй заказ, другой арендатор, порт S3 не по умолчанию и эпоха после восстановления.
+id: def456
+login: cust02
+registryUID: 0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d
+syncEpoch: "3"
+bucket: cust02-zot-def456
+endpoint: https://storage.example.test:9443
+region: ru-1
+vaultSecretPath: secret/data/clusters/example/namespaces/cust02/apps/docker-registry/zot-def456
+vaultAuthMount: kubernetes-tenants
+vaultRole: zot-def456

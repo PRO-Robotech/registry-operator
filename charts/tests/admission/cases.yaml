@@ -1,0 +1,250 @@
+# Пробы политик допуска V1–V15 на кластере (kind в CI). У каждой отрицательной пробы —
+# законный близнец: тот же объект и та же операция, меняется ровно один факт (автор
+# либо одно поле). Отказ засчитывается, только если его дала названная политика.
+#
+# verb: create | patch | delete — всегда --dry-run=server, кроме объектов setup.
+# as: ключ identities. base — объект, который setup создаёт заранее (для patch и delete).
+
+identities:
+  operator: {user: "system:serviceaccount:registry-system:registry-operator"}
+  addons: {user: "system:serviceaccount:addons-system:addons-operator"}
+  argo: {user: "system:serviceaccount:argocd:argocd-application-controller"}
+  rs: {user: "system:serviceaccount:kube-system:replicaset-controller"}
+  stranger: {user: "system:serviceaccount:cust01:intruder"}
+  platform: {user: "platform-admin", groups: ["platform-admins"]}
+
+objects:
+  robot: &robot
+    apiVersion: iam.kaname.in-cloud.io/v1alpha1
+    kind: ServiceAccount
+    metadata:
+      name: zot-abc123-ci
+      namespace: cust01
+      labels: {registry.in-cloud.io/id: abc123, registry.in-cloud.io/namespace: cust01}
+    spec: {name: zot-abc123-ci, enabled: true}
+  binding: &binding
+    apiVersion: iam.kaname.in-cloud.io/v1alpha1
+    kind: AccessBinding
+    metadata:
+      name: zot-abc123-ci-pusher
+      namespace: cust01
+      labels: {registry.in-cloud.io/id: abc123, registry.in-cloud.io/namespace: cust01}
+    spec:
+      subjects: [{serviceAccountRef: {name: zot-abc123-ci}}]
+      roleRef: {name: registry.pusher}
+      target: {resources: [{type: registry.registries, id: abc123}]}
+  route: &route
+    apiVersion: gateway.networking.k8s.io/v1
+    kind: HTTPRoute
+    metadata:
+      name: zot-abc123
+      namespace: registry-edge
+      labels: {registry.in-cloud.io/id: abc123, registry.in-cloud.io/namespace: cust01}
+    spec:
+      parentRefs: [{group: gateway.networking.k8s.io, kind: Gateway, name: registry-gw, namespace: registry-edge, sectionName: https}]
+      hostnames: [registry.example.test]
+      rules:
+        - matches: [{path: {type: PathPrefix, value: /v2/abc123/}}]
+          backendRefs: [{group: "", kind: Service, name: zot-abc123, namespace: cust01, port: 8080}]
+  zotsa: &zotsa
+    apiVersion: v1
+    kind: ServiceAccount
+    metadata: {name: zot-abc123, namespace: cust01}
+    automountServiceAccountToken: false
+  zotsvc: &zotsvc
+    apiVersion: v1
+    kind: Service
+    metadata: {name: zot-abc123, namespace: cust01}
+    spec: {selector: {app.kubernetes.io/name: zot}, ports: [{name: http, port: 8080, targetPort: 8080}]}
+  zotpod: &zotpod
+    apiVersion: v1
+    kind: Pod
+    metadata: {name: zot-abc123-probe, namespace: cust01}
+    spec:
+      serviceAccountName: zot-abc123
+      automountServiceAccountToken: false
+      containers: [{name: zot, image: "registry.k8s.io/pause:3.10"}]
+  marked: &marked
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: marked
+      namespace: cust01
+      annotations: {argocd.argoproj.io/tracking-id: "reg-abc123:apps/Deployment:cust01/zot-abc123"}
+  addon: &addon
+    apiVersion: addons.in-cloud.io/v1alpha1
+    kind: Addon
+    metadata:
+      name: reg-abc123
+      labels: {registry.in-cloud.io/id: abc123, registry.in-cloud.io/namespace: cust01}
+    spec:
+      chart: registry-instance
+      repoURL: oci://ghcr.io/pro-robotech/charts/registry-instance
+      version: 1.0.0
+      releaseName: zot-abc123
+      targetCluster: in-cluster
+      targetNamespace: cust01
+      backend:
+        type: argocd
+        namespace: argocd
+        project: registry-cust01
+        finalizer: true
+        syncPolicy:
+          automated: {prune: true, selfHeal: true}
+          syncOptions: [ServerSideApply=true, FailOnSharedResource=true]
+          retry: {limit: 5}
+      valuesSelectors:
+        - {name: order, priority: 0, matchLabels: {addons.in-cloud.io/addon: registry-instance, addons.in-cloud.io/values: order}}
+        - {name: site, priority: 10, matchLabels: {addons.in-cloud.io/addon: registry-instance, addons.in-cloud.io/values: site}}
+      variables:
+        id: abc123
+        login: cust01
+        registryUID: 3f1c2a9e-7b4d-4e8a-9c21-5d6f7a8b9c0d
+        syncEpoch: "0"
+        bucket: cust01-zot-abc123
+        endpoint: https://s3.example.test
+        region: ru-1
+        vaultSecretPath: secret/data/clusters/example/namespaces/cust01/apps/docker-registry/zot-abc123
+        vaultAuthMount: kubernetes-tenants
+        vaultRole: zot-abc123
+  layer: &layer
+    apiVersion: addons.in-cloud.io/v1alpha1
+    kind: AddonValue
+    metadata:
+      name: registry-instance-extra
+      labels: {addons.in-cloud.io/addon: registry-instance, addons.in-cloud.io/values: extra}
+    spec: {values: "site: {}\n"}
+  phase: &phase
+    apiVersion: addons.in-cloud.io/v1alpha1
+    kind: AddonPhase
+    metadata: {name: registry-platform}
+    spec:
+      rules:
+        - name: edge
+          selector: {name: edge, priority: 50, matchLabels: {addons.in-cloud.io/addon: registry-platform, addons.in-cloud.io/values: edge}}
+  project: &project
+    apiVersion: argoproj.io/v1alpha1
+    kind: AppProject
+    metadata: {name: registry-cust01, namespace: argocd}
+    spec:
+      sourceRepos: [oci://ghcr.io/pro-robotech/charts/registry-instance]
+      destinations: [{server: https://kubernetes.default.svc, namespace: cust01}]
+      clusterResourceWhitelist: []
+      namespaceResourceWhitelist: [{group: apps, kind: Deployment}, {group: "", kind: Service}]
+  vaultclaim: &vaultclaim
+    apiVersion: vault.in-cloud.io/v1alpha1
+    kind: VaultClaim
+    metadata:
+      name: zot-abc123
+      namespace: cust01
+      labels: {registry.in-cloud.io/id: abc123, registry.in-cloud.io/namespace: cust01}
+    spec:
+      vaultConfigRef: {name: default}
+      secretsPrefix: clusters/example
+      auth: {mountPath: kubernetes-tenants, manageConfig: false, autoCreate: false, rolePruning: Owned}
+      policies:
+        - name: zot-abc123-kv
+          identityPaths:
+            - path: secret/data/clusters/example/namespaces/{serviceAccountNamespace}/apps/docker-registry/{serviceAccountName}
+              capabilities: [read]
+      roles:
+        - name: zot-abc123
+          boundServiceAccounts: {names: [zot-abc123], namespace: cust01}
+          audience: vault
+          policies: [zot-abc123-kv, registry-dataplane-pki]
+          tokenTTL: 1h
+          tokenMaxTTL: 1h
+      deletionPolicy: Retain
+  bucket: &bucket
+    apiVersion: vault.in-cloud.io/v1alpha1
+    kind: S3BucketClaim
+    metadata:
+      name: zot-abc123
+      namespace: cust01
+      labels: {registry.in-cloud.io/id: abc123, registry.in-cloud.io/namespace: cust01}
+    spec:
+      vaultConfigRef: {name: s3-default}
+      clusterRef: {name: zot-abc123}
+      customerLogin: cust01
+      bucket: {public: false, managedBy: SYSTEM}
+      vault: {secretsPrefix: clusters/example, destinationPath: namespaces/cust01/apps/docker-registry/zot-abc123}
+      deletionPolicy: Retain
+  app: &app
+    apiVersion: argoproj.io/v1alpha1
+    kind: Application
+    metadata: {name: reg-abc123, namespace: argocd}
+    spec:
+      project: registry-cust01
+      destination: {server: https://kubernetes.default.svc, namespace: cust01}
+      source: {repoURL: oci://ghcr.io/pro-robotech/charts/registry-instance, chart: registry-instance, targetRevision: 1.0.0}
+
+# Создаётся до проб от имени платформы (группа system:masters входит в platformGroups пробы).
+setup: [*zotsa, *addon, *project, *app, *marked]
+
+cases:
+  # V1 — учётка и выдача kaname заказа.
+  - {name: v1-stranger-creates-robot, policy: v1-registry-iam, as: stranger, verb: create, expect: deny, object: *robot}
+  - {name: v1-operator-creates-robot, policy: v1-registry-iam, as: operator, verb: create, expect: allow, object: *robot, rename: zot-abc123-ci2}
+  - {name: v1-operator-binds-unknown-role, policy: v1-registry-iam, as: operator, verb: create, expect: deny, object: *binding, set: {spec.roleRef.name: registry.owner}}
+  - {name: v1-operator-binds-foreign-target, policy: v1-registry-iam, as: operator, verb: create, expect: deny, object: *binding, set: {spec.target.resources: [{type: registry.registries, id: xyz789}]}}
+  - {name: v1-operator-binds-pusher, policy: v1-registry-iam, as: operator, verb: create, expect: allow, object: *binding}
+  # V3 — маршрут заказа.
+  - {name: v3-stranger-creates-route, policy: v3-registry-route, as: stranger, verb: create, expect: deny, object: *route}
+  - {name: v3-operator-routes-foreign-path, policy: v3-registry-route, as: operator, verb: create, expect: deny, object: *route, set: {spec.rules: [{matches: [{path: {type: PathPrefix, value: /v2/xyz789/}}], backendRefs: [{group: "", kind: Service, name: zot-abc123, namespace: cust01, port: 8080}]}]}}
+  - {name: v3-operator-routes-own-path, policy: v3-registry-route, as: operator, verb: create, expect: allow, object: *route}
+  # V4 — поды SA zot-*.
+  - {name: v4-stranger-creates-zot-pod, policy: v4-registry-zot-pods, as: stranger, verb: create, expect: deny, object: *zotpod}
+  - {name: v4-replicaset-creates-zot-pod, policy: v4-registry-zot-pods, as: rs, verb: create, expect: allow, object: *zotpod}
+  # V5 — метка арендатора.
+  - {name: v5-stranger-labels-tenant, policy: v5-registry-tenant-namespaces, as: stranger, verb: patch, expect: deny, kind: namespace, target: cust02, patch: {metadata: {labels: {registry.in-cloud.io/tenant: "true"}}}}
+  - {name: v5-platform-labels-tenant, policy: v5-registry-tenant-namespaces, as: platform, verb: patch, expect: allow, kind: namespace, target: cust02, patch: {metadata: {labels: {registry.in-cloud.io/tenant: "true"}}}}
+  - {name: v5-stranger-labels-other, policy: v5-registry-tenant-namespaces, as: stranger, verb: patch, expect: allow, kind: namespace, target: cust02, patch: {metadata: {labels: {team: blue}}}}
+  # V8 — рабочая нагрузка zot-*.
+  - {name: v8-stranger-creates-zot-service, policy: v8-registry-zot-workload, as: stranger, verb: create, expect: deny, object: *zotsvc}
+  - {name: v8-argo-creates-zot-service, policy: v8-registry-zot-workload, as: argo, verb: create, expect: allow, object: *zotsvc}
+  - {name: v8-stranger-mounts-sa-token, policy: v8-registry-zot-workload, as: stranger, verb: patch, expect: deny, kind: serviceaccount, namespace: cust01, target: zot-abc123, patch: {automountServiceAccountToken: true}}
+  - {name: v8-stranger-annotates-sa, policy: v8-registry-zot-workload, as: stranger, verb: patch, expect: allow, kind: serviceaccount, namespace: cust01, target: zot-abc123, patch: {metadata: {annotations: {note: seen}}}}
+  - {name: v8-stranger-deletes-sa, policy: v8-registry-zot-workload, as: stranger, verb: delete, expect: deny, kind: serviceaccount, namespace: cust01, target: zot-abc123}
+  - {name: v8-argo-deletes-sa, policy: v8-registry-zot-workload, as: argo, verb: delete, expect: allow, kind: serviceaccount, namespace: cust01, target: zot-abc123}
+  # V9 — отметка отслеживания Argo CD.
+  - {name: v9-stranger-marks-for-registry-app, policy: v9-registry-tracking, as: stranger, verb: create, expect: deny, object: *marked, rename: marked2}
+  - {name: v9-stranger-marks-for-other-app, policy: v9-registry-tracking, as: stranger, verb: create, expect: allow, object: *marked, rename: marked3, set: {metadata.annotations: {argocd.argoproj.io/tracking-id: "other:/ConfigMap:cust01/marked3"}}}
+  - {name: v9-argo-marks-for-registry-app, policy: v9-registry-tracking, as: argo, verb: create, expect: allow, object: *marked, rename: marked4}
+  # V10 — Addon заказа.
+  - {name: v10-stranger-creates-addon, policy: v10-registry-addons, as: stranger, verb: create, expect: deny, object: *addon, rename: reg-def456, set: {metadata.labels: {registry.in-cloud.io/id: def456, registry.in-cloud.io/namespace: cust01}, spec.variables.id: def456, spec.variables.vaultRole: zot-def456, spec.releaseName: zot-def456}}
+  - {name: v10-operator-creates-addon, policy: v10-registry-addons, as: operator, verb: create, expect: allow, object: *addon, rename: reg-def456, set: {metadata.labels: {registry.in-cloud.io/id: def456, registry.in-cloud.io/namespace: cust01}, spec.variables.id: def456, spec.variables.vaultRole: zot-def456, spec.releaseName: zot-def456}}
+  - {name: v10-operator-unpinned-version, policy: v10-registry-addons, as: operator, verb: create, expect: deny, object: *addon, rename: reg-def456, set: {metadata.labels: {registry.in-cloud.io/id: def456, registry.in-cloud.io/namespace: cust01}, spec.variables.id: def456, spec.variables.vaultRole: zot-def456, spec.releaseName: zot-def456, spec.version: 9.9.9}}
+  - {name: v10-operator-foreign-namespace, policy: v10-registry-addons, as: operator, verb: create, expect: deny, object: *addon, rename: reg-def456, set: {metadata.labels: {registry.in-cloud.io/id: def456, registry.in-cloud.io/namespace: cust01}, spec.variables.id: def456, spec.variables.vaultRole: zot-def456, spec.releaseName: zot-def456, spec.targetNamespace: cust02}}
+  - {name: v10-operator-creates-non-registry-addon, policy: v10-registry-addons, as: operator, verb: create, expect: deny, object: *addon, rename: cilium}
+  - {name: v10-addons-operator-adds-finalizer, policy: v10-registry-addons, as: addons, verb: patch, expect: allow, kind: addons.addons.in-cloud.io, target: reg-abc123, patch: {metadata: {finalizers: [addons.in-cloud.io/finalizer]}}}
+  - {name: v10-addons-operator-changes-spec, policy: v10-registry-addons, as: addons, verb: patch, expect: deny, kind: addons.addons.in-cloud.io, target: reg-abc123, patch: {spec: {version: 1.0.1}}}
+  # V11 — слои AddonValue экземпляра.
+  - {name: v11-stranger-adds-layer, policy: v11-registry-addonvalues, as: stranger, verb: create, expect: deny, object: *layer}
+  - {name: v11-platform-adds-layer, policy: v11-registry-addonvalues, as: platform, verb: create, expect: allow, object: *layer}
+  - {name: v11-platform-adds-plugin-substitution, policy: v11-registry-addonvalues, as: platform, verb: create, expect: deny, object: *layer, set: {spec.values: "site:\n  x: <path:secret/data/x#y>\n"}}
+  # V12 — фазы.
+  - {name: v12-platform-creates-order-phase, policy: v12-registry-addonphases, as: platform, verb: create, expect: deny, object: *phase, rename: reg-abc123}
+  - {name: v12-platform-creates-platform-phase, policy: v12-registry-addonphases, as: platform, verb: create, expect: allow, object: *phase}
+  - {name: v12-stranger-creates-platform-phase, policy: v12-registry-addonphases, as: stranger, verb: create, expect: deny, object: *phase}
+  # V13 — проекты Argo CD.
+  - {name: v13-stranger-creates-project, policy: v13-registry-appprojects, as: stranger, verb: create, expect: deny, object: *project, rename: registry-cust02, set: {spec.destinations: [{server: "https://kubernetes.default.svc", namespace: cust02}]}}
+  - {name: v13-platform-creates-project, policy: v13-registry-appprojects, as: platform, verb: create, expect: allow, object: *project, rename: registry-cust02, set: {spec.destinations: [{server: "https://kubernetes.default.svc", namespace: cust02}]}}
+  - {name: v13-platform-project-with-source-namespaces, policy: v13-registry-appprojects, as: platform, verb: create, expect: deny, object: *project, rename: registry-cust02, set: {spec.destinations: [{server: "https://kubernetes.default.svc", namespace: cust02}], spec.sourceNamespaces: ["*"]}}
+  - {name: v13-platform-project-to-foreign-namespace, policy: v13-registry-appprojects, as: platform, verb: create, expect: deny, object: *project, rename: registry-cust02}
+  # V14 — роль Vault и бакет заказа.
+  - {name: v14-stranger-creates-vaultclaim, policy: v14-registry-vault-claims, as: stranger, verb: create, expect: deny, object: *vaultclaim}
+  - {name: v14-operator-creates-vaultclaim, policy: v14-registry-vault-claims, as: operator, verb: create, expect: allow, object: *vaultclaim}
+  - {name: v14-operator-owns-the-mount, policy: v14-registry-vault-claims, as: operator, verb: create, expect: deny, object: *vaultclaim, set: {spec.auth.manageConfig: true}}
+  - {name: v14-operator-binds-foreign-sa, policy: v14-registry-vault-claims, as: operator, verb: create, expect: deny, object: *vaultclaim, set: {spec.roles: [{name: zot-abc123, boundServiceAccounts: {names: [default], namespace: cust01}, audience: vault, policies: [zot-abc123-kv, registry-dataplane-pki], tokenTTL: 1h, tokenMaxTTL: 1h}]}}
+  - {name: v14-operator-creates-bucket, policy: v14-registry-vault-claims, as: operator, verb: create, expect: allow, object: *bucket}
+  - {name: v14-operator-public-bucket, policy: v14-registry-vault-claims, as: operator, verb: create, expect: deny, object: *bucket, set: {spec.bucket: {public: true, managedBy: SYSTEM}}}
+  # V15 — Application заказа.
+  - {name: v15-stranger-creates-app, policy: v15-registry-applications, as: stranger, verb: create, expect: deny, object: *app, rename: reg-def456}
+  - {name: v15-addons-operator-creates-app, policy: v15-registry-applications, as: addons, verb: create, expect: allow, object: *app, rename: reg-def456}
+  - {name: v15-stranger-changes-app-spec, policy: v15-registry-applications, as: stranger, verb: patch, expect: deny, kind: applications.argoproj.io, namespace: argocd, target: reg-abc123, patch: {spec: {project: default}}}
+  - {name: v15-stranger-refreshes-app, policy: v15-registry-applications, as: stranger, verb: patch, expect: allow, kind: applications.argoproj.io, namespace: argocd, target: reg-abc123, patch: {metadata: {annotations: {argocd.argoproj.io/refresh: normal}}}}
+  - {name: v15-stranger-deletes-app, policy: v15-registry-applications, as: stranger, verb: delete, expect: deny, kind: applications.argoproj.io, namespace: argocd, target: reg-abc123}
+
+# Политики, чьи виды дают CRD registry-operator (полоса оператора): без них в ветке
+# пробы этих политик «не выполнились», а не зелёные.
+needsRegistryCRDs: [v2-registry-status, v6-registry-reservations, v7-registry-annotations]

@@ -1,0 +1,97 @@
+# Площадка-пример: все имена и адреса — вымышленные (example.test).
+instanceChart:
+  pins:
+    - version: 1.0.0
+      digest: sha256:1d6a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8
+addon:
+  backend:
+    namespace: argocd
+    projectMode: shared
+    project: registry
+site:
+  vault:
+    address: https://vault.vault.svc:8200
+    caConfigMap:
+      name: platform-ca
+      key: ca.crt
+    tokenAudience: vault
+    pki:
+      mount: pki-dataplane
+      role: registry-dataplane
+      commonName: registry-dataplane.example.test
+      uriSAN: spiffe://example.test/ns/registry-dataplane/sa/registry-dataplane
+  kaname:
+    checkAddress: kaname-internal.example.test:9091
+    jwksURL: https://kaname.example.test:9097/.well-known/jwks.json
+  sidecar:
+    audience: registry
+  images:
+    zot:
+      repository: ghcr.io/project-zot/zot-linux-amd64
+      tag: v2.1.20
+      digest: sha256:95a837a0afacf5b7edc0c92493f04beee6891989b8d2fd50a00cf65a1e6d4fd5
+    sidecar:
+      repository: ghcr.io/pro-robotech/svc-registry
+      tag: v0.1.0
+      digest: sha256:2e7b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809
+  edge:
+    proxy:
+      namespace: envoy-gateway-system
+      gateway:
+        name: registry-gw
+        namespace: registry-edge
+  network:
+    allowKubeletProbes: false
+    dns:
+      namespace: kube-system
+      labels:
+        k8s-app: kube-dns
+    vault:
+      - namespace: vault
+        labels:
+          app.kubernetes.io/name: vault
+        ports: [8200]
+    kaname:
+      - fqdn: kaname-internal.example.test
+        ports: [9091]
+      - fqdn: kaname.example.test
+        ports: [9097]
+  resources:
+    zot:
+      requests: {cpu: 100m, memory: 256Mi}
+      limits: {memory: 1Gi}
+    sidecar:
+      requests: {cpu: 20m, memory: 32Mi}
+      limits: {memory: 128Mi}
+    vaultAgent:
+      requests: {cpu: 10m, memory: 32Mi}
+      limits: {cpu: 100m, memory: 64Mi}
+    scratchSizeLimit: 2Gi
+sharedRoutes:
+  enabled: true
+  namespace: registry-edge
+  gateway:
+    name: registry-gw
+    namespace: registry-edge
+    sectionName: https
+  host: registry.example.test
+  apiRoot:
+    backend:
+      namespace: registry-system
+      name: registry-api-root
+      port: 8080
+  token:
+    backend:
+      namespace: kaname
+      name: kaname-token
+      port: 8080
+gateway:
+  enabled: true
+  name: registry-gw
+  namespace: registry-edge
+  gatewayClassName: envoy-gateway
+  sectionName: https
+  host: registry.example.test
+  certificateSecretName: registry-edge-tls
+  routeNamespaceLabels:
+    registry.in-cloud.io/edge: "true"
