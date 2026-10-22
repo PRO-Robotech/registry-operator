@@ -64,6 +64,10 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	authenticator, err := iamproxy.NewCredentialVerifier(verifier, cfg.KanameURL, kanameClient, cfg.CheckTimeout)
+	if err != nil {
+		return err
+	}
 	checker := &iamproxy.CachedChecker{Inner: kaname, TTL: cfg.CacheTTL, MaxEntries: 16384, Now: time.Now}
 	enrollClient, err := iamproxy.TLSClient(cfg.EnrollCAFile, cfg.EnrollTimeout)
 	if err != nil {
@@ -88,7 +92,7 @@ func run() error {
 
 	proxy, err := iamproxy.New(iamproxy.Options{
 		RegistryID: cfg.RegistryID, Public: cfg.Public, Upstream: upstream,
-		Verifier: verifier, Checker: checker, Enroller: enroller, Log: log,
+		Verifier: authenticator, Checker: checker, Enroller: enroller, Log: log,
 		Decisions: func(action, outcome string) { decisions.WithLabelValues(action, outcome).Inc() },
 	})
 	if err != nil {

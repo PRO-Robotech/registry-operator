@@ -55,14 +55,20 @@ func NamesFor(p *policy.Config, id, login string, sa *observedv1alpha1.ObservedI
 	ab *observedv1alpha1.ObservedIamAccessBindingTemplate, route *observedv1alpha1.ObservedHTTPRouteTemplate,
 ) Names {
 	n := Names{
-		Storage:        p.ResourceName(id, ""),
-		ServiceAccount: p.ResourceName(id, sa.Spec.NameSuffix),
-		Secrets:        p.ResourceName(id, ""),
-		AccessBinding:  p.ResourceName(id, ab.Spec.NameSuffix),
+		Storage: p.ResourceName(id, ""),
+
+		Secrets: p.ResourceName(id, ""),
+
 		Addon:          p.AddonName(id),
 		Route:          p.ResourceName(id, ""),
 		RouteNamespace: route.Spec.TargetNamespace,
 		Workload:       p.ResourceName(id, ""),
+	}
+	if sa != nil {
+		n.ServiceAccount = p.ResourceName(id, sa.Spec.NameSuffix)
+	}
+	if ab != nil {
+		n.AccessBinding = p.ResourceName(id, ab.Spec.NameSuffix)
 	}
 	if n.RouteNamespace == "" {
 		n.RouteNamespace = login

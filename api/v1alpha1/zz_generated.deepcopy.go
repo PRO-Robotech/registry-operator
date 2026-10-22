@@ -434,7 +434,7 @@ func (in *RegistryTemplateList) DeepCopyObject() runtime.Object {
 func (in *RegistryTemplateSpec) DeepCopyInto(out *RegistryTemplateSpec) {
 	*out = *in
 	in.ClaimPolicy.DeepCopyInto(&out.ClaimPolicy)
-	out.Templates = in.Templates
+	in.Templates.DeepCopyInto(&out.Templates)
 	if in.StallTimeout != nil {
 		in, out := &in.StallTimeout, &out.StallTimeout
 		*out = new(v1.Duration)
@@ -486,9 +486,17 @@ func (in *ResourceStatus) DeepCopy() *ResourceStatus {
 func (in *ResourceTemplates) DeepCopyInto(out *ResourceTemplates) {
 	*out = *in
 	out.S3BucketClaim = in.S3BucketClaim
-	out.IamServiceAccount = in.IamServiceAccount
+	if in.IamServiceAccount != nil {
+		in, out := &in.IamServiceAccount, &out.IamServiceAccount
+		*out = new(TemplateRef)
+		**out = **in
+	}
 	out.VaultClaim = in.VaultClaim
-	out.IamAccessBinding = in.IamAccessBinding
+	if in.IamAccessBinding != nil {
+		in, out := &in.IamAccessBinding, &out.IamAccessBinding
+		*out = new(TemplateRef)
+		**out = **in
+	}
 	out.Addon = in.Addon
 	out.HTTPRoute = in.HTTPRoute
 }

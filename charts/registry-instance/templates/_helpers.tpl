@@ -68,6 +68,17 @@ registry.in-cloud.io/namespace: {{ .root.Values.instance.login | toJson }}
 registry.in-cloud.io/owner-uid: {{ .root.Values.instance.registryUID | toJson }}
 {{- end -}}
 
+{{/* Метки площадки добавляются только поду; даже равное значение встроенного ключа — конфликт. */}}
+{{- define "ri.injectorLabels" -}}
+{{- $builtIn := include "ri.labels" (dict "root" . "component" "workload") | fromYaml -}}
+{{- range $key, $value := .Values.site.vault.injectorLabels -}}
+{{- if hasKey $builtIn $key -}}
+{{- fail (printf "site.vault.injectorLabels conflicts with built-in label %q" $key) -}}
+{{- end -}}
+{{ printf "\n%s: %s" ($key | toJson) ($value | toJson) }}
+{{- end -}}
+{{- end -}}
+
 {{- define "ri.selectorLabels" -}}
 app.kubernetes.io/name: zot
 registry.in-cloud.io/id: {{ .Values.instance.id | toJson }}

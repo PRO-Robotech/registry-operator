@@ -63,6 +63,8 @@ func newFixture(t *testing.T) fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Golden-набор сохраняет явно запрошенный прежний шестишаговый режим.
+	reg.Spec.TemplateRef = registryv1alpha1.TemplateRef{Name: set.RegistryTemplate.Spec.TemplateName, Version: set.RegistryTemplate.Spec.Version}
 	reg.UID = types.UID("6f1c2a3b-4d5e-4f60-8a71-92b3c4d5e6f7")
 	params, err := render.StrictYAMLMap([]byte(set.RegistryTemplate.Spec.Params))
 	if err != nil {

@@ -29,6 +29,7 @@ spec:
     metadata:
       labels:
         {{- include "ri.labels" (dict "root" . "component" "workload") | nindent 8 }}
+        {{- with include "ri.injectorLabels" . | trim }}{{ . | nindent 8 }}{{- end }}
       annotations:
         vault.hashicorp.com/agent-inject: "true"
         vault.hashicorp.com/agent-init-first: "true"

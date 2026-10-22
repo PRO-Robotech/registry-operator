@@ -7,7 +7,7 @@ description: >-
   Addon written by registry-operator, which owns the bucket, the Vault role, the
   IAM robot, binding and resource tuple and the edge route.
 type: application
-version: 1.0.0
+version: 1.0.1
 appVersion: "v2.1.20"
 kubeVersion: ">=1.30.0-0"
 home: https://github.com/PRO-Robotech/registry-operator

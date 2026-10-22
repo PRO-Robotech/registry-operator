@@ -38,8 +38,8 @@ type Config struct {
 	Audience   string
 	TokenTypes string
 
-	// KanameURL — публичный REST-фронт kaname (https без пути): Check тем же
-	// токеном, что у клиента API.
+	// KanameURL — публичный standalone Kaname REST (https без пути): WhoAmI
+	// и self Check тем же удостоверением клиента, с поддержкой opaque credentials.
 	KanameURL    string
 	KanameCAFile string
 	CheckTimeout time.Duration
@@ -68,7 +68,7 @@ func (c *Config) BindFlags(fs *flag.FlagSet) {
 	fs.StringVar(&c.Issuer, "issuer", "", "token issuer")
 	fs.StringVar(&c.Audience, "audience", "", "token audience of the public API of kaname")
 	fs.StringVar(&c.TokenTypes, "token-types", "at+jwt", "comma-separated accepted typ headers")
-	fs.StringVar(&c.KanameURL, "kaname-url", "", "https URL of the public REST front of kaname (AuthorizeService.Check)")
+	fs.StringVar(&c.KanameURL, "kaname-url", "", "https URL of the standalone Kaname public REST (opaque WhoAmI and self Check)")
 	fs.StringVar(&c.KanameCAFile, "kaname-ca", "", "CA bundle of kaname")
 	fs.DurationVar(&c.CheckTimeout, "check-timeout", 2*time.Second, "deadline of one authorization check")
 	fs.DurationVar(&c.CacheTTL, "cache-ttl", MaxCacheTTL, "lifetime of a cached read verdict (at most 10s)")
@@ -100,7 +100,7 @@ func (c *Config) Validate() error {
 	if strings.TrimSpace(c.TokenTypes) == "" {
 		add("token-types must not be empty")
 	}
-	if u, err := url.Parse(c.KanameURL); err != nil || u.Scheme != "https" || u.Host == "" || (u.Path != "" && u.Path != "/") || u.RawQuery != "" {
+	if u, err := url.Parse(c.KanameURL); err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Fragment != "" || u.ForceQuery || (u.Path != "" && u.Path != "/") || u.RawQuery != "" {
 		add("kaname-url must be an https URL without a path")
 	}
 	if c.KanameCAFile == "" {

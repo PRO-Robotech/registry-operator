@@ -42,6 +42,8 @@ var (
 type Identity struct {
 	Subject string
 	Token   string
+	// Opaque запрещает положительный кэш Check: срок удостоверения известен авторитету.
+	Opaque bool
 }
 
 // TokenConfig — проверка токенов клиентов.

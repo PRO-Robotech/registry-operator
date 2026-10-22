@@ -25,15 +25,18 @@ type ClaimPolicy struct {
 // ResourceTemplates — ревизии observed-шаблонов шести ресурсов пайплайна.
 // Вид цели зашит в вид шаблона: ссылка на шаблон не той группы ресурсов
 // невыразима.
+// +kubebuilder:validation:XValidation:rule="has(self.iamServiceAccount) == has(self.iamAccessBinding)",message="identity and access templates must be supplied together or both omitted"
 type ResourceTemplates struct {
 	// S3BucketClaim — ObservedS3BucketClaimTemplate (шаг storage).
 	S3BucketClaim TemplateRef `json:"s3BucketClaim"`
 	// IamServiceAccount — ObservedIamServiceAccountTemplate (шаг identity).
-	IamServiceAccount TemplateRef `json:"iamServiceAccount"`
+	// +optional
+	IamServiceAccount *TemplateRef `json:"iamServiceAccount,omitempty"`
 	// VaultClaim — ObservedVaultClaimTemplate (шаг secrets).
 	VaultClaim TemplateRef `json:"vaultClaim"`
 	// IamAccessBinding — ObservedIamAccessBindingTemplate (шаг access).
-	IamAccessBinding TemplateRef `json:"iamAccessBinding"`
+	// +optional
+	IamAccessBinding *TemplateRef `json:"iamAccessBinding,omitempty"`
 	// Addon — ObservedAddonTemplate (шаг workload).
 	Addon TemplateRef `json:"addon"`
 	// HTTPRoute — ObservedHTTPRouteTemplate (шаг route).
@@ -122,4 +125,17 @@ type RegistryTemplateList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []RegistryTemplate `json:"items"`
+}
+
+// HasClientIdentity — совместимая явная пара клиентских IAM-шаблонов.
+func (r ResourceTemplates) HasClientIdentity() bool {
+	return r.IamServiceAccount != nil && r.IamAccessBinding != nil
+}
+
+// OptionalRef возвращает пустое значение только для отсутствующей ссылки.
+func OptionalRef(r *TemplateRef) TemplateRef {
+	if r == nil {
+		return TemplateRef{}
+	}
+	return *r
 }

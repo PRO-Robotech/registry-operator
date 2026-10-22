@@ -6,6 +6,8 @@ package controller
 import (
 	"context"
 
+	"k8s.io/apimachinery/pkg/api/meta"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
@@ -44,7 +46,11 @@ func (r *RegistryReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		}
 		return []reconcile.Request{{NamespacedName: types.NamespacedName{Namespace: ns, Name: id}}}
 	})
-	for _, k := range kinds.Written {
+	available, err := AvailableWritten(mgr.GetRESTMapper())
+	if err != nil {
+		return err
+	}
+	for _, k := range available {
 		u := &unstructured.Unstructured{}
 		u.SetGroupVersionKind(k.GVK)
 		b = b.Watches(u, byOwnerLabels)
@@ -100,13 +106,32 @@ func Setup(ctx context.Context, mgr ctrl.Manager, deps *Deps) error {
 
 // CacheByObject — кэш ведомых видов только с метками владения оператора:
 // чужие объекты тех же видов в памяти оператора не держатся.
-func CacheByObject() map[client.Object]cache.ByObject {
+func CacheByObject(available ...kinds.Kind) map[client.Object]cache.ByObject {
+	if len(available) == 0 {
+		available = kinds.Written
+	}
 	sel := labels.SelectorFromSet(labels.Set{registryv1alpha1.LabelManagedBy: registryv1alpha1.ManagedByValue})
 	out := map[client.Object]cache.ByObject{}
-	for _, k := range kinds.Written {
+	for _, k := range available {
 		u := &unstructured.Unstructured{}
 		u.SetGroupVersionKind(k.GVK)
 		out[u] = cache.ByObject{Label: sel}
 	}
 	return out
+}
+
+// AvailableWritten исключает только отсутствующий необязательный IAM API.
+// Ошибки discovery и отсутствие любого обязательного вида не скрываются.
+func AvailableWritten(mapper meta.RESTMapper) ([]kinds.Kind, error) {
+	out := make([]kinds.Kind, 0, len(kinds.Written))
+	for _, k := range kinds.Written {
+		if _, err := mapper.RESTMapping(k.GVK.GroupKind(), k.GVK.Version); err != nil {
+			if kinds.OptionalClientKind(k) && meta.IsNoMatchError(err) {
+				continue
+			}
+			return nil, err
+		}
+		out = append(out, k)
+	}
+	return out, nil
 }

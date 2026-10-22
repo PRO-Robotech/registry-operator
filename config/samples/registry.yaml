@@ -7,5 +7,5 @@ metadata:
 spec:
   id: abc123
   templateRef:
-    name: zot
+    name: zot-service
     version: v1

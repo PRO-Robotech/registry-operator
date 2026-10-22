@@ -168,5 +168,9 @@ step kubeconform kubeconform -strict -summary -kubernetes-version 1.30.0 \
 # 7. Нет проверок здоровья Lua ни в исходниках чартов, ни в рендере.
 step no-lua py no-lua "$PLATFORM" "$INSTANCE" "$OUT/platform-default.yaml" "$OUT/platform-all.yaml"
 
+# 8. Метки инжектора: все случаи и их законные близнецы видны в общей переписи.
+step injector-labels python3 -I "$T/injector-labels.py" "$INSTANCE" "$OUT/layers/abc123.order.yaml" "$OUT/layers/site.yaml"
+cat "$OUT/injector-labels.log"
+
 echo "charts: passed $pass, failed $fail"
 [ "$fail" -eq 0 ] && [ "$pass" -gt 0 ]

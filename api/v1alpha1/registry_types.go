@@ -138,6 +138,7 @@ const (
 	ReasonChartUnreachable      = "ChartUnreachable"
 	ReasonApplyFailed           = "ApplyFailed"
 	ReasonWaitingForDependency  = "WaitingForDependency"
+	ReasonDependencyUnavailable = "DependencyUnavailable"
 	ReasonResourceReady         = "ResourceReady"
 	ReasonResourceMissing       = "ResourceMissing"
 	ReasonResourceProgressing   = "ResourceProgressing"
@@ -177,6 +178,7 @@ var ReasonMessages = map[string]string{
 	ReasonChartUnreachable:      "chart digest could not be verified; the addon is not written",
 	ReasonApplyFailed:           "resource could not be written",
 	ReasonWaitingForDependency:  "resource waits for the previous pipeline step",
+	ReasonDependencyUnavailable: "requested child API is unavailable",
 	ReasonResourceReady:         "resource is ready",
 	ReasonResourceMissing:       "resource does not exist",
 	ReasonResourceProgressing:   "resource is not ready yet",

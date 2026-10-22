@@ -206,11 +206,12 @@ spec:
                 required:
                 - addon
                 - httpRoute
-                - iamAccessBinding
-                - iamServiceAccount
                 - s3BucketClaim
                 - vaultClaim
                 type: object
+                x-kubernetes-validations:
+                - message: identity and access templates must be supplied together or both omitted
+                  rule: has(self.iamServiceAccount) == has(self.iamAccessBinding)
               version:
                 description: Version — ревизия линии.
                 maxLength: 7

@@ -9,6 +9,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -32,6 +33,7 @@ type pass struct {
 	reservation      *registryv1alpha1.RegistryIDReservation
 	names            desired.Names
 	templateResolved bool
+	clientIdentity   bool
 	allReady         bool
 	stallTimeout     *metav1.Duration
 	endpoint         string
@@ -105,8 +107,6 @@ func (p *pass) compose() {
 	if p.deleting {
 		st.Phase = registryv1alpha1.PhaseDeleting
 		st.Endpoint = ""
-		st.Resources = nil
-		st.Registration = nil
 		setCondition(&st.Conditions, gen, registryv1alpha1.ConditionReady, false, registryv1alpha1.ReasonDeleting)
 		reason := registryv1alpha1.ReasonDeleting
 		if p.deleteReason != "" {
@@ -126,12 +126,35 @@ func (p *pass) compose() {
 	case p.reason == registryv1alpha1.ReasonIDTaken:
 		setCondition(&st.Conditions, gen, registryv1alpha1.ConditionIDReserved, false, registryv1alpha1.ReasonIDTaken)
 	}
+	if p.templateResolved && !p.clientIdentity {
+		meta.RemoveStatusCondition(&st.Conditions, registryv1alpha1.ConditionIdentityReady)
+		meta.RemoveStatusCondition(&st.Conditions, registryv1alpha1.ConditionAccessReady)
+	}
 	if p.templateResolved {
 		setCondition(&st.Conditions, gen, registryv1alpha1.ConditionTemplateResolved, true, registryv1alpha1.ReasonTemplateResolved)
 	} else if p.reason == registryv1alpha1.ReasonTemplateNotFound || p.reason == registryv1alpha1.ReasonTemplateNotAccepted {
 		setCondition(&st.Conditions, gen, registryv1alpha1.ConditionTemplateResolved, false, p.reason)
 	}
 
+	// Частичный проход не доказывает исчезновение ранее известных IAM детей.
+	// Их учёт нужен для безопасного удаления и отказа неявной миграции 6→4.
+	if !p.templateResolved || p.clientIdentity {
+		for _, previous := range st.Resources {
+			k, ok := kinds.ForStep(previous.Step)
+			if !ok || !kinds.OptionalClientKind(k) {
+				continue
+			}
+			seen := false
+			for _, current := range p.resources {
+				seen = seen || current.Step == previous.Step
+			}
+			if !seen {
+				previous.Ready = false
+				previous.Reason = registryv1alpha1.ReasonWaitingForDependency
+				p.resources = append(p.resources, previous)
+			}
+		}
+	}
 	if len(p.resources) > 0 {
 		st.Resources = p.resources
 		for _, rs := range p.resources {

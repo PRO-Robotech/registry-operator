@@ -60,9 +60,13 @@ var observedKinds = []struct {
 	{"ObservedVaultClaimTemplate", func() observedv1alpha1.Template { return &observedv1alpha1.ObservedVaultClaimTemplate{} },
 		func(r registryv1alpha1.ResourceTemplates) registryv1alpha1.TemplateRef { return r.VaultClaim }},
 	{"ObservedIamServiceAccountTemplate", func() observedv1alpha1.Template { return &observedv1alpha1.ObservedIamServiceAccountTemplate{} },
-		func(r registryv1alpha1.ResourceTemplates) registryv1alpha1.TemplateRef { return r.IamServiceAccount }},
+		func(r registryv1alpha1.ResourceTemplates) registryv1alpha1.TemplateRef {
+			return registryv1alpha1.OptionalRef(r.IamServiceAccount)
+		}},
 	{"ObservedIamAccessBindingTemplate", func() observedv1alpha1.Template { return &observedv1alpha1.ObservedIamAccessBindingTemplate{} },
-		func(r registryv1alpha1.ResourceTemplates) registryv1alpha1.TemplateRef { return r.IamAccessBinding }},
+		func(r registryv1alpha1.ResourceTemplates) registryv1alpha1.TemplateRef {
+			return registryv1alpha1.OptionalRef(r.IamAccessBinding)
+		}},
 	{"ObservedAddonTemplate", func() observedv1alpha1.Template { return &observedv1alpha1.ObservedAddonTemplate{} },
 		func(r registryv1alpha1.ResourceTemplates) registryv1alpha1.TemplateRef { return r.Addon }},
 	{"ObservedHTTPRouteTemplate", func() observedv1alpha1.Template { return &observedv1alpha1.ObservedHTTPRouteTemplate{} },
@@ -86,7 +90,10 @@ func SetupIndexes(ctx context.Context, mgr ctrl.Manager) error {
 		rt := o.(*registryv1alpha1.RegistryTemplate)
 		out := make([]string, 0, len(observedKinds))
 		for _, k := range observedKinds {
-			out = append(out, k.kind+"/"+k.ref(rt.Spec.Templates).ObjectName())
+			ref := k.ref(rt.Spec.Templates)
+			if ref.Name != "" {
+				out = append(out, k.kind+"/"+ref.ObjectName())
+			}
 		}
 		return out
 	})
@@ -196,7 +203,7 @@ func (r *ObservedTemplateReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&registryv1alpha1.RegistryTemplate{}, handler.EnqueueRequestsFromMapFunc(func(_ context.Context, o client.Object) []reconcile.Request {
 			rt := o.(*registryv1alpha1.RegistryTemplate)
 			for _, k := range observedKinds {
-				if k.kind == r.Kind {
+				if k.kind == r.Kind && k.ref(rt.Spec.Templates).Name != "" {
 					return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: k.ref(rt.Spec.Templates).ObjectName()}}}
 				}
 			}
@@ -251,8 +258,14 @@ func (r *RegistryTemplateReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	if err := policy.CheckTemplateParams(params); err != nil {
 		return ctrl.Result{}, r.setAccepted(ctx, rt, false, registryv1alpha1.ReasonTemplateInvalid, err.Error())
 	}
+	if (rt.Spec.Templates.IamServiceAccount == nil) != (rt.Spec.Templates.IamAccessBinding == nil) {
+		return ctrl.Result{}, r.setAccepted(ctx, rt, false, registryv1alpha1.ReasonTemplateInvalid, "identity and access references must be paired")
+	}
 	for _, k := range observedKinds {
 		ref := k.ref(rt.Spec.Templates)
+		if !rt.Spec.Templates.HasClientIdentity() && (k.kind == "ObservedIamServiceAccountTemplate" || k.kind == "ObservedIamAccessBindingTemplate") {
+			continue
+		}
 		obj := k.new()
 		if err := r.Get(ctx, types.NamespacedName{Name: ref.ObjectName()}, obj); err != nil {
 			if client.IgnoreNotFound(err) != nil {

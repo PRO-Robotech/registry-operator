@@ -123,7 +123,19 @@ func (r *RegistryReconciler) provision(ctx context.Context, p *pass) (ctrl.Resul
 	if err != nil {
 		return r.outcome(ctx, p, err)
 	}
+	if !set.rt.Spec.Templates.HasClientIdentity() {
+		for _, k := range []kinds.Kind{kinds.IamAccessBinding, kinds.IamServiceAccount} {
+			objects, err := r.listOwned(ctx, k, reg)
+			if err != nil {
+				return r.outcome(ctx, p, err)
+			}
+			if len(objects) != 0 {
+				return r.outcome(ctx, p, &refusal{reason: registryv1alpha1.ReasonPolicyViolation, msg: "owned client IAM resources require explicit migration before omitting identity/access"})
+			}
+		}
+	}
 	p.templateResolved = true
+	p.clientIdentity = set.rt.Spec.Templates.HasClientIdentity()
 	if err := r.checkClaimPolicy(ctx, reg, set.rt); err != nil {
 		return r.outcome(ctx, p, err)
 	}
@@ -149,6 +161,9 @@ func (r *RegistryReconciler) provision(ctx context.Context, p *pass) (ctrl.Resul
 	for i, stage := range kinds.Stages {
 		stageReady := true
 		for _, k := range stage {
+			if kinds.OptionalClientKind(k) && !p.clientIdentity {
+				continue
+			}
 			if !open {
 				r.observeClosed(ctx, p, k, in)
 				stageReady = false
@@ -292,14 +307,20 @@ func (r *RegistryReconciler) resolveTemplates(ctx context.Context, reg *registry
 		return nil, err
 	}
 	refs := s.rt.Spec.Templates
+	if (refs.IamServiceAccount == nil) != (refs.IamAccessBinding == nil) {
+		return nil, &refusal{reason: registryv1alpha1.ReasonPolicyViolation, msg: "identity and access references must be paired"}
+	}
 	for _, t := range []struct {
 		ref registryv1alpha1.TemplateRef
 		obj observedv1alpha1.Template
 	}{
-		{refs.S3BucketClaim, s.s3}, {refs.IamServiceAccount, s.sa}, {refs.VaultClaim, s.vault},
-		{refs.IamAccessBinding, s.ab}, {refs.Addon, s.addon}, {refs.HTTPRoute, s.route},
+		{refs.S3BucketClaim, s.s3}, {registryv1alpha1.OptionalRef(refs.IamServiceAccount), s.sa}, {refs.VaultClaim, s.vault},
+		{registryv1alpha1.OptionalRef(refs.IamAccessBinding), s.ab}, {refs.Addon, s.addon}, {refs.HTTPRoute, s.route},
 	} {
 		obj := t.obj
+		if (obj == s.sa && refs.IamServiceAccount == nil) || (obj == s.ab && refs.IamAccessBinding == nil) {
+			continue
+		}
 		if err := get(t.ref.ObjectName(), obj, func() []metav1.Condition { return obj.TemplateStatus().Conditions }); err != nil {
 			return nil, err
 		}
@@ -312,6 +333,11 @@ func (r *RegistryReconciler) resolveTemplates(ctx context.Context, reg *registry
 	s.templates = map[registryv1alpha1.Step]observedv1alpha1.Template{
 		registryv1alpha1.StepStorage: s.s3, registryv1alpha1.StepIdentity: s.sa, registryv1alpha1.StepSecrets: s.vault,
 		registryv1alpha1.StepAccess: s.ab, registryv1alpha1.StepWorkload: s.addon, registryv1alpha1.StepRoute: s.route,
+	}
+	if !refs.HasClientIdentity() {
+		s.sa, s.ab = nil, nil
+		delete(s.templates, registryv1alpha1.StepIdentity)
+		delete(s.templates, registryv1alpha1.StepAccess)
 	}
 	return s, nil
 }
@@ -334,6 +360,14 @@ func (r *RegistryReconciler) checkClaimPolicy(ctx context.Context, reg *registry
 
 // ensureStep собирает, проверяет и пишет объект шага и читает его готовность.
 func (r *RegistryReconciler) ensureStep(ctx context.Context, p *pass, k kinds.Kind, tpl observedv1alpha1.Template, in desired.Input) (*unstructured.Unstructured, kinds.Result, error) {
+	if kinds.OptionalClientKind(k) {
+		if _, err := r.RESTMapper().RESTMapping(k.GVK.GroupKind(), k.GVK.Version); err != nil {
+			if meta.IsNoMatchError(err) {
+				return nil, kinds.Result{}, &waiting{reason: registryv1alpha1.ReasonDependencyUnavailable, msg: "requested IAM child API is not installed"}
+			}
+			return nil, kinds.Result{}, err
+		}
+	}
 	want, err := desired.Build(k, tpl, in)
 	switch {
 	case desired.IsRender(err):
@@ -438,6 +472,9 @@ func (r *RegistryReconciler) collectStale(ctx context.Context, p *pass, in desir
 	want := map[string]bool{}
 	for _, st := range kinds.Stages {
 		for _, k := range st {
+			if kinds.OptionalClientKind(k) && !p.clientIdentity {
+				continue
+			}
 			name, ns := in.Names.ObjectKey(k, p.reg.Namespace)
 			want[k.GVK.Kind+"/"+ns+"/"+name] = true
 		}
@@ -472,6 +509,13 @@ func (r *RegistryReconciler) listOwned(ctx context.Context, k kinds.Kind, reg *r
 	if err := r.APIReader.List(ctx, list, sel); err != nil {
 		// Вида нет на кластере — объектов вида у заказа нет.
 		if meta.IsNoMatchError(err) || apierrors.IsNotFound(err) {
+			if kinds.OptionalClientKind(k) {
+				for _, resource := range reg.Status.Resources {
+					if resource.Step == k.Step {
+						return nil, &waiting{reason: registryv1alpha1.ReasonDependencyUnavailable, msg: "recorded IAM child API disappeared; cleanup is unproven"}
+					}
+				}
+			}
 			return nil, nil
 		}
 		return nil, err

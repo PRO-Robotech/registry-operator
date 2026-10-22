@@ -39,6 +39,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/PRO-Robotech/corelib/credsecret"
+
 	"github.com/PRO-Robotech/registry-operator/internal/kaname"
 )
 
@@ -283,6 +285,8 @@ func (p *Proxy) identity(r *http.Request) (*Identity, verdict) {
 	}
 	id, err := p.o.Verifier.Verify(r.Context(), raw)
 	switch {
+	case errors.Is(err, ErrIdentityUnavailable):
+		return nil, unavailable
 	case errors.Is(err, ErrKeys):
 		p.o.Log.Error("iam-proxy: issuer keys unavailable", "err", err)
 		return nil, unavailable
@@ -293,14 +297,18 @@ func (p *Proxy) identity(r *http.Request) (*Identity, verdict) {
 }
 
 // presentedToken — токен kaname из Authorization: Bearer <токен> либо
-// Basic, где паролем служит токен, а имя пользователя не значит ничего
-// (docker login требует непустое имя). Иная схема, неразборчивый Basic и
+// Basic: для opaque имя равно CredentialID, для JWT имя не определяет
+// субъекта (docker login требует непустое имя). Иная схема, неразборчивый Basic и
 // пустой токен — не токен.
 func presentedToken(r *http.Request) (string, bool) {
 	if raw, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
 		return raw, raw != ""
 	}
-	if _, password, ok := r.BasicAuth(); ok {
+	if username, password, ok := r.BasicAuth(); ok {
+		if credsecret.HasMark(password) {
+			parsed, err := credsecret.Parse(password)
+			return password, err == nil && username == parsed.CredentialID
+		}
 		return password, password != ""
 	}
 	return "", false

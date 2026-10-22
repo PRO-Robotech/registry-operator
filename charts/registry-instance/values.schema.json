@@ -291,6 +291,17 @@
       "description": "Deadline of one outbound call, whole seconds.",
       "type": "string",
       "pattern": "^[1-9][0-9]?s$"
+    },
+    "injectorLabelKey": {
+      "type": "string",
+      "allOf": [
+        {
+          "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*/)?[A-Za-z0-9]([A-Za-z0-9._-]{0,61}[A-Za-z0-9])?$"
+        },
+        {
+          "pattern": "^([^/]{1,253}/)?[^/]{1,63}$"
+        }
+      ]
     }
   },
   "properties": {
@@ -422,6 +433,18 @@
             },
             "tokenAudience": {
               "$ref": "#/definitions/audience"
+            },
+            "injectorLabels": {
+              "description": "Platform injector selection labels on Pod metadata only; built-in label collisions are rejected during rendering.",
+              "type": "object",
+              "propertyNames": {
+                "$ref": "#/definitions/injectorLabelKey"
+              },
+              "additionalProperties": {
+                "type": "string",
+                "maxLength": 63,
+                "pattern": "^([A-Za-z0-9]([A-Za-z0-9._-]{0,61}[A-Za-z0-9])?)?$"
+              }
             }
           }
         },

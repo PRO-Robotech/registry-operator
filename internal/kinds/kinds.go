@@ -173,3 +173,8 @@ func FirstNotReadyStage(ready map[registryv1alpha1.Step]bool) int {
 	}
 	return len(Stages)
 }
+
+// OptionalClientKind — ресурсы клиента, которые новый сервис сам не заказывает.
+func OptionalClientKind(k Kind) bool {
+	return k.Step == registryv1alpha1.StepIdentity || k.Step == registryv1alpha1.StepAccess
+}

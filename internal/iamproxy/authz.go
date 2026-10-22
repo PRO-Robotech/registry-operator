@@ -68,13 +68,13 @@ type KanameChecker struct {
 // без пути, client доверяет центру kaname.
 func NewKanameChecker(base string, client *http.Client, timeout time.Duration) (*KanameChecker, error) {
 	u, err := url.Parse(base)
-	if err != nil || u.Scheme != "https" || u.Host == "" || (u.Path != "" && u.Path != "/") || u.RawQuery != "" {
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Fragment != "" || u.ForceQuery || (u.Path != "" && u.Path != "/") || u.RawQuery != "" {
 		return nil, fmt.Errorf("kaname url %q must be an https URL without a path", base)
 	}
 	if client == nil || timeout <= 0 {
 		return nil, errors.New("kaname checker needs an http client and a deadline")
 	}
-	return &KanameChecker{url: strings.TrimSuffix(base, "/") + checkPath, http: client, timeout: timeout}, nil
+	return &KanameChecker{url: strings.TrimSuffix(base, "/") + checkPath, http: withoutRedirects(client), timeout: timeout}, nil
 }
 
 type checkRequest struct {
@@ -162,7 +162,7 @@ func cacheable(verb string) bool { return verb == VerbGet || verb == VerbList }
 
 // Check — вердикт из кэша либо от Inner.
 func (c *CachedChecker) Check(ctx context.Context, id Identity, verb, object string) (bool, error) {
-	if !cacheable(verb) || c.TTL <= 0 {
+	if id.Opaque || !cacheable(verb) || c.TTL <= 0 {
 		return c.Inner.Check(ctx, id, verb, object)
 	}
 	sum := sha256.Sum256([]byte(id.Token))

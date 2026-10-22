@@ -72,3 +72,22 @@ func TestCachedChecker_KeyIsTheTokenAndWritesBypass(t *testing.T) {
 		t.Fatal("a cached denial outlived the grant")
 	}
 }
+
+// Opaque не наследует кэш JWT без известного срока удостоверения.
+func TestCachedChecker_OpaqueAlwaysAsksAuthority(t *testing.T) {
+	inner := &counting{allowed: true}
+	c := &iamproxy.CachedChecker{Inner: inner, TTL: 10 * time.Second, MaxEntries: 8, Now: time.Now}
+	id := iamproxy.Identity{Subject: "service_account:one", Token: "opaque", Opaque: true}
+	for range 2 {
+		if ok, err := c.Check(context.Background(), id, iamproxy.VerbGet, "registry_registry:one"); !ok || err != nil {
+			t.Fatal(ok, err)
+		}
+	}
+	inner.allowed = false
+	if ok, err := c.Check(context.Background(), id, iamproxy.VerbGet, "registry_registry:one"); ok || err != nil {
+		t.Fatal("revoked permission was cached", err)
+	}
+	if inner.calls != 3 {
+		t.Fatal("opaque check cached")
+	}
+}

@@ -49,8 +49,10 @@ site:
     address: ""
     # Аудитория projected-токена SA пода для входа vault-agent; равна audience роли.
     tokenAudience: vault
+    # Метки выбора инжектора площадки: только Pod, без подмены встроенных меток.
+    injectorLabels: {}
   kaname:
-    # Публичный REST-фронт kaname (https://host[:port] без пути): AuthorizeService.Check
+    # Standalone Kaname public REST (https://host[:port] без пути): opaque WhoAmI + self Check, без Kacho gateway.
     # токеном клиента «о себе»; внутренний листенер :9091 схема отвергает.
     url: ""
     # Набор ключей kaname (JWKS); только https.
@@ -67,9 +69,9 @@ site:
     # registry-operator проверяет её через TokenReview.
     tokenAudience: registry-operator
   iamProxy:
-    # Срок кэша вердиктов Check по (хэш токена, объект, глагол): 1s–10s.
+    # Срок кэша JWT Check по (хэш токена, объект, глагол): 1s–10s; opaque без кэша.
     decisionCacheTTL: ""
-    # Дедлайн одного Check kaname: 1s–30s.
+    # Дедлайн каждого WhoAmI / Check: 1s–30s.
     checkTimeout: ""
     # Дедлайн одной заявки на регистрацию: 1s–60s.
     enrollTimeout: ""

@@ -4,7 +4,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Проба iam-proxy и регистрации оператора против НАСТОЯЩЕГО kaname (стенд в
-// kind, hack/it-kaname.sh probe). Токен клиента — ОБЫЧНЫЙ токен kaname, тот
+// kind, hack/it-kaname.sh probe), прямо через Service/http-rest. Новая opaque
+// проба требует Kaname с direct opaque authN: прежний pin 93ad недостаточен.
+// JWT клиента — ОБЫЧНЫЙ токен kaname, тот
 // же, что для API: служебной учётки (обмен подписанного утверждения ключом
 // учётки на /iam/v1/token) и человека (своя церемония службы, посев стенда).
 // Прокси собран из тех же частей, что в поде (проверка токена по набору
@@ -43,6 +45,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/PRO-Robotech/corelib/credsecret"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 	"github.com/golang-jwt/jwt/v5"
 	"google.golang.org/grpc"
@@ -501,8 +504,8 @@ type proxy struct {
 	registry string
 }
 
-// newProxy — прокси одного регистри из частей пода: проверка токена ключами
-// kaname с адресатом публичного API, Check «о себе» тем же токеном, кэш
+// newProxy — прокси из частей пода: локальная проверка JWT либо прямой
+// WhoAmI для opaque, Check «о себе» тем же удостоверением, JWT-кэш
 // вердиктов cacheTTL (0 — без кэша).
 func (w *world) newProxy(t *testing.T, registry string, public bool, cacheTTL time.Duration) *proxy {
 	t.Helper()
@@ -514,6 +517,14 @@ func (w *world) newProxy(t *testing.T, registry string, public bool, cacheTTL ti
 		JWKSURL: env["REGOP_IT_JWKS_URL"], HTTPClient: jwksClient, Issuer: env["REGOP_IT_ISSUER"], Audience: env["REGOP_IT_AUDIENCE"],
 		Algorithms: []string{"ES256"}, Types: []string{"at+jwt"}, KeysTTL: 5 * time.Minute, RefreshEvery: time.Second, Leeway: 30 * time.Second,
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	identityClient, err := iamproxy.TLSClient(tlsPath("server-ca.crt"), 10*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authenticator, err := iamproxy.NewCredentialVerifier(v, env["REGOP_IT_REST_URL"], identityClient, 10*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -532,7 +543,7 @@ func (w *world) newProxy(t *testing.T, registry string, public bool, cacheTTL ti
 		}
 	})
 	p, err := iamproxy.New(iamproxy.Options{
-		RegistryID: registry, Public: public, Upstream: up, Verifier: v,
+		RegistryID: registry, Public: public, Upstream: up, Verifier: authenticator,
 		Checker:  &iamproxy.CachedChecker{Inner: kc, TTL: cacheTTL, MaxEntries: 1024, Now: time.Now},
 		Enroller: enr, Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
@@ -553,7 +564,15 @@ func (p *proxy) send(t *testing.T, scheme, method, path, token string) *http.Res
 	case "bearer":
 		req.Header.Set("Authorization", "Bearer "+token)
 	case "basic":
-		req.SetBasicAuth("robot", token)
+		username := "robot"
+		if credsecret.HasMark(token) {
+			parsed, err := credsecret.Parse(token)
+			if err != nil {
+				t.Fatal("malformed opaque test credential")
+			}
+			username = parsed.CredentialID
+		}
+		req.SetBasicAuth(username, token)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
