@@ -5,13 +5,16 @@ package controller_test
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
@@ -575,3 +578,47 @@ func TestTemplates_RevisionInUseIsKept(t *testing.T) {
 		return k8s.Get(ctx(), types.NamespacedName{Name: "zot-v2"}, cur)
 	})
 }
+
+// Ревизия без региона площадки не разрешается в заказе: TemplateResolved
+// False с причиной TemplateNotAccepted, диагностика называет параметр, и ни
+// одного ресурса заказа (бакета первым) оператор не пишет — Addon, который
+// чарт отверг бы, не рисуется. Законный близнец — ревизия zot-v1 примеров —
+// разрешается в остальных пробах пайплайна.
+func TestTemplates_RevisionWithoutARegionIsNotResolved(t *testing.T) {
+	const ns, id = "pipe08", "pipe08a"
+	tenant(t, ns, "prj08", "acc08")
+	set, err := samples.Load(samplesDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := set.RegistryTemplate.DeepCopy()
+	rt.ObjectMeta = metav1.ObjectMeta{Name: "zot-v3"}
+	rt.Spec.Version = "v3"
+	params, n := regionLine.ReplaceAllString(rt.Spec.Params, `${1}""`), len(regionLine.FindAllString(rt.Spec.Params, -1))
+	if n != 1 {
+		t.Fatalf("the sample revision has %d storage.region lines, want 1", n)
+	}
+	rt.Spec.Params = params
+	if err := k8s.Create(ctx(), rt); err != nil {
+		t.Fatal(err)
+	}
+	order(t, ns, id, func(r *registryv1alpha1.Registry) { r.Spec.TemplateRef.Version = "v3" })
+	eventually(t, wait, "template not resolved", func() error {
+		reg := registry(t, ns, id)
+		c := meta.FindStatusCondition(reg.Status.Conditions, registryv1alpha1.ConditionTemplateResolved)
+		if c == nil || c.Status != metav1.ConditionFalse || c.Reason != registryv1alpha1.ReasonTemplateNotAccepted {
+			return fmt.Errorf("TemplateResolved %v (phase %s)", c, reg.Status.Phase)
+		}
+		d := reservation(t, id).Status.Diagnostics
+		if d == nil || !strings.Contains(d.Message, "params.storage.region") {
+			return fmt.Errorf("diagnostics %+v do not name params.storage.region", d)
+		}
+		return nil
+	})
+	consistently(t, 2*time.Second, "no resource of the order", func() error {
+		return absent(children(ns, id)[registryv1alpha1.StepStorage])
+	})
+}
+
+// regionLine — строка region раздела storage параметров ревизии примеров.
+var regionLine = regexp.MustCompile(`(?m)^(  region: ).*$`)

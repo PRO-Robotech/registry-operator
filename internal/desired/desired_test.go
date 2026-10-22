@@ -320,3 +320,104 @@ func withValue(t *testing.T, tpl observedv1alpha1.Template, value string) observ
 	t.Fatalf("unknown template %T", tpl)
 	return nil
 }
+
+// withBucketEndpoint — вход сборки, где контроллер бакета вывел endpoint ep.
+func withBucketEndpoint(f fixture, ep string) Input {
+	in := f.in
+	in.Status = readyStatus()
+	s3 := in.Status[kinds.S3BucketClaim.StatusKey]
+	st := map[string]any{}
+	for k, v := range s3.Status {
+		st[k] = v
+	}
+	st["endpoint"] = ep
+	s3.Status = st
+	in.Status[kinds.S3BucketClaim.StatusKey] = s3
+	return in
+}
+
+// Endpoint бакета в переменных заказа — всегда https-origin: оператор
+// приводит хост из S3BucketClaim.status.endpoint к https://<host>[:port].
+// Законный близнец — уже https-origin — проходит без изменений; форма,
+// которую чарт registry-instance отверг бы, — отказ политики, а не Addon.
+func TestBuild_AddonEndpointIsTheHTTPSOriginOfTheBucket(t *testing.T) {
+	for _, c := range []struct{ name, status, want string }{
+		{"https origin passes unchanged", "https://s3.example.test", "https://s3.example.test"},
+		{"https origin with a port passes unchanged", "https://s3.example.test:9000", "https://s3.example.test:9000"},
+		{"bare host gets https", "s3.example.test", "https://s3.example.test"},
+		{"bare host with a port gets https", "s3.example.test:9000", "https://s3.example.test:9000"},
+		{"trailing slash of the origin is dropped", "https://s3.example.test/", "https://s3.example.test"},
+		{"scheme and host case is folded", "HTTPS://S3.Example.Test", "https://s3.example.test"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := newFixture(t)
+			u, err := Build(kinds.Addon, f.set.Addon, withBucketEndpoint(f, c.status))
+			if err != nil {
+				t.Fatalf("build: %v", err)
+			}
+			if got, _, _ := unstructured.NestedString(u.Object, "spec", "variables", "endpoint"); got != c.want {
+				t.Fatalf("variables.endpoint %q from status %q, want %q", got, c.status, c.want)
+			}
+		})
+	}
+	for _, c := range []struct{ name, status string }{
+		{"plain http", "http://s3.example.test"},
+		{"another scheme", "ftp://s3.example.test"},
+		{"a path", "https://s3.example.test/bucket"},
+		{"credentials", "https://key:supersecret@s3.example.test"},
+		{"a query", "https://s3.example.test?x=1"},
+		{"a fragment", "https://s3.example.test#x"},
+		{"empty", ""},
+		{"port out of range", "s3.example.test:70000"},
+		{"port zero", "s3.example.test:0"},
+		{"not a dns name", "s3_example.test"},
+	} {
+		t.Run("refused: "+c.name, func(t *testing.T) {
+			f := newFixture(t)
+			_, err := Build(kinds.Addon, f.set.Addon, withBucketEndpoint(f, c.status))
+			switch {
+			case !IsPolicy(err):
+				t.Fatalf("endpoint %q: want a policy refusal, got %v", c.status, err)
+			case !strings.Contains(err.Error(), "spec.variables.endpoint:"):
+				t.Fatalf("refusal does not name spec.variables.endpoint: %v", err)
+			case strings.Contains(err.Error(), "supersecret"):
+				t.Fatalf("refusal echoes the credentials of the endpoint: %v", err)
+			}
+		})
+	}
+}
+
+// region в переменных заказа — непустое имя региона (форма схемы чарта
+// registry-instance, storage.region): Addon с пустым регионом чарт отверг
+// бы, и оператор его не пишет. Законный близнец — ru-1.
+func TestBuild_AddonRegionIsANonEmptyRegionName(t *testing.T) {
+	build := func(t *testing.T, region string) (*unstructured.Unstructured, error) {
+		t.Helper()
+		f := newFixture(t)
+		params := map[string]any{}
+		for k, v := range f.in.Params {
+			params[k] = v
+		}
+		storage := map[string]any{}
+		for k, v := range params["storage"].(map[string]any) {
+			storage[k] = v
+		}
+		storage["region"] = region
+		params["storage"] = storage
+		f.in.Params = params
+		return Build(kinds.Addon, f.set.Addon, f.in)
+	}
+	u, err := build(t, "ru-1")
+	if err != nil {
+		t.Fatalf("lawful twin refused: %v", err)
+	}
+	if got, _, _ := unstructured.NestedString(u.Object, "spec", "variables", "region"); got != "ru-1" {
+		t.Fatalf("variables.region %q, want ru-1", got)
+	}
+	for _, region := range []string{"", "RU_1", "-ru", strings.Repeat("r", 65)} {
+		_, err := build(t, region)
+		if !IsPolicy(err) || !strings.Contains(err.Error(), "spec.variables.region:") {
+			t.Fatalf("region %q: want a policy refusal naming spec.variables.region, got %v", region, err)
+		}
+	}
+}

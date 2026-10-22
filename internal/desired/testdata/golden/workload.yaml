@@ -39,12 +39,12 @@ spec:
   - name: site
     priority: 10
     matchLabels:
-      addons.in-cloud.io/addon: registry-platform
+      addons.in-cloud.io/addon: registry-instance
       addons.in-cloud.io/values: site
   - name: order
     priority: 20
     matchLabels:
-      addons.in-cloud.io/addon: registry-platform
+      addons.in-cloud.io/addon: registry-instance
       addons.in-cloud.io/values: order
   variables:
     id: abc123
@@ -54,7 +54,7 @@ spec:
     public: "false"
     bucket: cust01-zot-abc123
     endpoint: https://s3.example.test
-    region: ""
+    region: ru-1
     vaultSecretPath: secret/data/clusters/site-a/namespaces/cust01/apps/docker-registry/zot-abc123
     vaultAuthMount: kubernetes-site-a
     vaultRole: zot-abc123
