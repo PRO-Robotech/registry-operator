@@ -127,3 +127,105 @@ injections:
     new: "if err != nil {"
     package: ./internal/iamproxy/
     tests: [TestCachedChecker_KeyIsTheTokenAndWritesBypass, TestProxy_PushOfANewRepositoryStartsWithBlobChecks]
+  - name: system-class-authenticated-accepted
+    file: internal/policy/validate.go
+    old: "case sub.SystemClass.Name != \"anonymous\":"
+    new: "case sub.SystemClass.Name != \"anonymous\" && sub.SystemClass.Name != \"authenticated\":"
+    package: ./internal/policy/
+    tests: [TestValidate_SystemClassFollowsThePublicityOfTheOrder]
+  - name: anonymous-grant-on-a-private-order
+    file: internal/policy/validate.go
+    old: "case !o.Public:"
+    new: "case false:"
+    package: ./internal/policy/
+    tests: [TestValidate_SystemClassFollowsThePublicityOfTheOrder]
+  - name: token-checks-accounted-for-all-sources-at-once
+    file: internal/enroll/server.go
+    old: "if !s.sources.allow(sourceOf(req)) {"
+    new: "if !s.sources.allow(\"every-source\") {"
+    package: ./internal/enroll/
+    tests: [TestEnroll_UnauthenticatedFloodFromOneSourceDoesNotStarveOthers]
+  - name: new-repository-rate-ignored
+    file: internal/enroll/server.go
+    old: "if !withinRate(res.Status.Repositories, now, s.Limits.RatePerMinute, s.Limits.Burst) {"
+    new: "if false {"
+    package: ./internal/enroll/
+    tests: [TestEnroll_RepositoryLimitAndRate, TestEnroll_RateIsHeldAcrossReplicas]
+  - name: compensation-tried-once
+    file: internal/enroll/server.go
+    old: "\t\t\tcase <-t.C:\n\t\t\t}"
+    new: "\t\t\tcase <-t.C:\n\t\t\t\treturn\n\t\t\t}"
+    package: ./internal/enroll/
+    tests: [TestEnroll_CompensationIsRetriedUntilIAMAnswers]
+  - name: compensation-dropped
+    file: internal/enroll/server.go
+    old: "\t\ts.compensate(ctx, repo)\n"
+    new: ""
+    package: ./internal/enroll/
+    tests: [TestEnroll_CompensationIsRetriedUntilIAMAnswers, TestEnroll_ClosingDuringTheWriteIsCompensated]
+  - name: concurrent-enrollments-of-one-repository-not-deduplicated
+    file: internal/enroll/server.go
+    old: "\t\t\tif r.Name != body.Repository {\n\t\t\t\tcontinue\n\t\t\t}\n\t\t\tentry = r"
+    new: "\t\t\tif true {\n\t\t\t\tcontinue\n\t\t\t}\n\t\t\tentry = r"
+    package: ./internal/enroll/
+    tests: [TestEnroll_ConcurrentEnrollmentsOfOneNewRepository]
+  - name: concurrent-enrollments-past-the-limit
+    file: internal/enroll/server.go
+    old: "if len(res.Status.Repositories) >= s.Limits.MaxRepositories {"
+    new: "if len(res.Status.Repositories) > s.Limits.MaxRepositories {"
+    package: ./internal/enroll/
+    tests: [TestEnroll_ConcurrentEnrollmentsAtTheLastFreeSlot]
+  - name: finalizer-added-without-the-object-version
+    file: internal/controller/registry_controller.go
+    old: "patch := client.MergeFromWithOptions(reg.DeepCopy(), client.MergeFromWithOptimisticLock{})"
+    new: "patch := client.MergeFrom(reg.DeepCopy())"
+    package: ./internal/controller/
+    tests: [TestFinalizer_AddingKeepsAForeignFinalizer]
+  - name: finalizer-dropped-without-the-object-version
+    file: internal/controller/registry_deletion.go
+    old: "patch := client.MergeFromWithOptions(reg.DeepCopy(), client.MergeFromWithOptimisticLock{})"
+    new: "patch := client.MergeFrom(reg.DeepCopy())"
+    package: ./internal/controller/
+    tests: [TestFinalizer_DroppingDoesNotResurrectARemovedFinalizer]
+  - name: project-pinned-before-the-confirmation
+    file: internal/controller/registration.go
+    old: "if rec := p.reservation.Status.Registration; rec != nil && rec.RegisteredAt != nil {"
+    new: "if rec := p.reservation.Status.Registration; rec != nil {"
+    package: ./internal/controller/
+    tests: [TestPipeline_UnconfirmedProjectFollowsTheLabel]
+  - name: unconfirmed-intent-moved-without-withdrawing-the-old-write
+    file: internal/controller/registration.go
+    old: "\tif prev.Project != \"\" {"
+    new: "\tif false {"
+    package: ./internal/controller/
+    tests: [TestPipeline_UnconfirmedProjectFollowsTheLabel]
+  - name: known-key-waits-for-the-issuer
+    file: internal/iamproxy/token.go
+    old: "\t\tif known {\n\t\t\t// Издатель обновляется в стороне; прежний снимок действует.\n\t\t\treturn k, nil\n\t\t}\n"
+    new: ""
+    package: ./internal/iamproxy/
+    tests: [TestVerifier_SilentIssuerDoesNotSerializeRequests]
+  - name: failed-key-refresh-not-backed-off
+    file: internal/iamproxy/token.go
+    old: "v.nextAt = now.Add(backoff(v.cfg.RefreshEvery, v.failures))"
+    new: "v.nextAt = now"
+    package: ./internal/iamproxy/
+    tests: [TestVerifier_FailedRefreshBacksOff]
+  - name: version-check-not-answered
+    file: internal/iamproxy/proxy.go
+    old: "if r.URL.Path == \"/v2/\" && r.URL.RawPath == \"\" && (r.Method == http.MethodGet || r.Method == http.MethodHead) {"
+    new: "if false {"
+    package: ./internal/iamproxy/
+    tests: [TestProxy_VersionCheck]
+  - name: version-check-open-on-a-private-registry
+    file: internal/iamproxy/proxy.go
+    old: "if v == allow && id == nil && !p.o.Public {"
+    new: "if false {"
+    package: ./internal/iamproxy/
+    tests: [TestProxy_VersionCheck]
+  - name: half-written-pair-replaces-the-working-one
+    file: internal/tlsfile/tlsfile.go
+    old: "\t\tif k.cert != nil {\n\t\t\treturn k.cert, nil\n\t\t}\n"
+    new: ""
+    package: ./internal/tlsfile/
+    tests: [TestKeyPair_ReloadedAfterRotationAndKeptOverAHalfWrittenPair]

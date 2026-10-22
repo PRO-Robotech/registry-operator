@@ -1,0 +1,147 @@
+name: integration-kaname
+
+# Оператор и iam-proxy против НАСТОЯЩЕГО kaname (стенд чартом в kind, по
+# образцу интеграционного прогона kaname-iam-operator).
+#
+# Ревизия kaname — ветка, в которой публичный Check принимает докер-токен
+# регистри для вопроса «о себе» (утверждения принципала и acr при выпуске);
+# её имя — переменная репозитория REGOP_IT_KANAME_BRANCH. Образ —
+# prorobotech/kaname:<ветка>-<sha8 головы>, его публикует конвейер kaname.
+# Манифест модуля registry — charts/registry-platform этого дерева.
+#
+# Пока любого из трёх условий нет (ветка не названа, образа нет, манифеста
+# нет), прогон НЕ ВЫПОЛНИЛСЯ: шаг называет недостающее аннотацией и
+# завершается отказом — это не зелёный и не вердикт о дереве. Код 75 стенда
+# и it-kaname.sh — то же «условие не создано».
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: integration-kaname-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kaname:
+    name: real kaname (kind, chart)
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      KANAME_BRANCH: ${{ vars.REGOP_IT_KANAME_BRANCH }}
+      KANAME_STAND_ALERT_RULES: "off"
+      KANAME_STAND_CLUSTER: regop-it-kaname
+      KANAME_STAND_SKIP_BUILD: "1"
+      REGOP_IT_CONTEXT: kind-regop-it-kaname
+      REGOP_IT_NAMESPACE: kaname
+      REGOP_IT_RELEASE: kaname
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Conditions (kaname branch, its image, the module manifest)
+        id: cond
+        run: |
+          missing=""
+          [ -s charts/registry-platform/files/registry.manifest.yaml ] \
+            || missing="$missing; no registry module manifest in charts/registry-platform"
+          if [ -z "$KANAME_BRANCH" ]; then
+            missing="$missing; repository variable REGOP_IT_KANAME_BRANCH is not set"
+          else
+            sha=$(git ls-remote https://github.com/PRO-Robotech/kaname "refs/heads/$KANAME_BRANCH" | cut -c1-40)
+            if [ -z "$sha" ]; then
+              missing="$missing; kaname branch $KANAME_BRANCH does not exist"
+            else
+              image="prorobotech/kaname:$(echo "$KANAME_BRANCH" | sed 's#/#-#g')-${sha::8}"
+              docker manifest inspect "$image" >/dev/null 2>&1 || missing="$missing; image $image is not published"
+              echo "sha=$sha" >> "$GITHUB_OUTPUT"
+              echo "image=$image" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+          if [ -n "$missing" ]; then
+            echo "::error title=NOT EXECUTED::${missing#; } — no verdict about the tree"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          repository: PRO-Robotech/kaname
+          ref: ${{ steps.cond.outputs.sha }}
+          path: .kaname-src
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+
+      - name: Stand coordinates (outside the work tree)
+        run: |
+          echo "KANAME_STAND_WORKDIR=$RUNNER_TEMP/kaname-stand" >> "$GITHUB_ENV"
+          echo "KUBECONFIG=$RUNNER_TEMP/kaname-stand.kubeconfig" >> "$GITHUB_ENV"
+          echo "REGOP_IT_KUBECONFIG=$RUNNER_TEMP/kaname-stand.kubeconfig" >> "$GITHUB_ENV"
+          echo "REGOP_IT_CA_DIR=$RUNNER_TEMP/kaname-stand/pki" >> "$GITHUB_ENV"
+
+      - name: Tools
+        run: |
+          go install sigs.k8s.io/kind@v0.33.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          pip install --quiet pyyaml==6.0.2
+
+      - name: kaname image of the branch
+        run: |
+          docker pull "${{ steps.cond.outputs.image }}"
+          echo "KANAME_STAND_IMAGE=${{ steps.cond.outputs.image }}" >> "$GITHUB_ENV"
+
+      - name: kaname stand up
+        timeout-minutes: 30
+        working-directory: .kaname-src
+        run: |
+          rc=0
+          .github/scripts/stand-chart.sh up || rc=$?
+          case "$rc" in
+            0) ;;
+            75) echo "::error title=NOT EXECUTED::the kaname stand did not come up — no verdict about the tree"; exit 1 ;;
+            *) exit "$rc" ;;
+          esac
+
+      - name: Human of the login lane
+        timeout-minutes: 10
+        working-directory: .kaname-src
+        run: |
+          rc=0
+          .github/scripts/stand-chart.sh seed-login-lane || rc=$?
+          case "$rc" in
+            0) ;;
+            75) echo "::error title=NOT EXECUTED::the login-lane human was not seeded — no verdict about the tree"; exit 1 ;;
+            *) exit "$rc" ;;
+          esac
+
+      - name: Probe against the stand
+        timeout-minutes: 25
+        run: |
+          rc=0
+          hack/it-kaname.sh > "$RUNNER_TEMP/kanameit.log" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/kanameit.log"
+          echo "kanameit rc=$rc"
+          case "$rc" in
+            0) ;;
+            75|3) echo "::error title=NOT EXECUTED::it-kaname.sh could not create its condition — no verdict about the tree"; exit 1 ;;
+            *) exit "$rc" ;;
+          esac
+
+      - name: kaname diagnostics on failure
+        if: failure() && steps.cond.outcome == 'success'
+        run: |
+          kubectl --context "$REGOP_IT_CONTEXT" -n kaname get pods -o wide || true
+          kubectl --context "$REGOP_IT_CONTEXT" -n kaname logs -l app.kubernetes.io/name=kaname --tail=200 --all-containers || true
+
+      - name: kaname stand down
+        if: always() && steps.cond.outcome == 'success'
+        working-directory: .kaname-src
+        run: .github/scripts/stand-chart.sh down || true

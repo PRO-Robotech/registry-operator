@@ -1,8 +1,8 @@
 version: "2"
 run:
   timeout: 10m
-  # Пробы kind и zot собираются своими тегами — линтер читает и их.
-  build-tags: [e2e, integration]
+  # Пробы kind, zot и настоящего kaname собираются своими тегами — линтер читает и их.
+  build-tags: [e2e, integration, kanameit]
 linters:
   default: none
   enable:
