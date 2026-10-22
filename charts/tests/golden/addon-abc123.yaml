@@ -1,0 +1,52 @@
+apiVersion: addons.in-cloud.io/v1alpha1
+kind: Addon
+metadata:
+  name: reg-abc123
+spec:
+  backend:
+    finalizer: true
+    namespace: argocd
+    project: registry
+    syncPolicy:
+      automated:
+        prune: true
+        selfHeal: true
+      retry:
+        backoff:
+          duration: 10s
+          factor: 2
+          maxDuration: 3m
+        limit: 5
+      syncOptions:
+      - ServerSideApply=true
+      - FailOnSharedResource=true
+    type: argocd
+  chart: registry-instance
+  releaseName: zot-abc123
+  repoURL: oci://ghcr.io/pro-robotech/charts/registry-instance
+  targetCluster: in-cluster
+  targetNamespace: cust01
+  valuesSelectors:
+  - matchLabels:
+      addons.in-cloud.io/addon: registry-instance
+      addons.in-cloud.io/values: order
+    name: order
+    priority: 0
+  - matchLabels:
+      addons.in-cloud.io/addon: registry-instance
+      addons.in-cloud.io/values: site
+    name: site
+    priority: 10
+  variables:
+    bucket: cust01-zot-abc123
+    endpoint: https://s3.example.test
+    id: abc123
+    login: cust01
+    public: 'false'
+    region: ru-1
+    registryUID: 3f1c2a9e-7b4d-4e8a-9c21-5d6f7a8b9c0d
+    syncEpoch: '0'
+    vaultAuthMount: kubernetes-tenants
+    vaultRole: zot-abc123
+    vaultSecretPath: secret/data/clusters/example/namespaces/cust01/apps/docker-registry/zot-abc123
+  version: 1.0.0
