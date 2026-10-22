@@ -40,7 +40,10 @@ spec:
         vault.hashicorp.com/role: {{ .Values.vault.role | toJson }}
         vault.hashicorp.com/agent-service-account-token-volume-name: vault-token
         vault.hashicorp.com/agent-copy-volume-mounts: zot
-        vault.hashicorp.com/agent-run-as-same-user: "true"
+        # uid и gid пода: config.json (0440) читает zot. agent-run-as-same-user здесь не годится —
+        # он требует runAsUser у первого контейнера, а uid задан на уровне пода.
+        vault.hashicorp.com/agent-run-as-user: "65532"
+        vault.hashicorp.com/agent-run-as-group: "65532"
         vault.hashicorp.com/template-config-exit-on-retry-failure: "true"
         vault.hashicorp.com/agent-requests-cpu: {{ .Values.site.resources.vaultAgent.requests.cpu | toJson }}
         vault.hashicorp.com/agent-requests-mem: {{ .Values.site.resources.vaultAgent.requests.memory | toJson }}

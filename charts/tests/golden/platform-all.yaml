@@ -1,0 +1,1324 @@
+---
+# Source: registry-platform/templates/admission.yaml
+# ПОКА БЕЗ (выключено по умолчанию): параметры политик допуска регистри. Те же проверки
+# registry-operator исполняет сам перед записью; политики закрывают прочих писателей.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: "registry-platform-admission"
+  namespace: "registry-system"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+data:
+  registryOperator: "system:serviceaccount:registry-system:registry-operator"
+  addonsOperator: "system:serviceaccount:addons-system:addons-operator"
+  argoController: "system:serviceaccount:argocd:argocd-application-controller"
+  replicaSetController: "system:serviceaccount:kube-system:replicaset-controller"
+  namespaceController: "system:serviceaccount:kube-system:namespace-controller"
+  garbageCollector: "system:serviceaccount:kube-system:generic-garbage-collector"
+  platformUsers: "platform-admin"
+  platformGroups: "platform-admins"
+  allowedRoles: "registry.puller,registry.pusher,registry.admin"
+  vaultConfig: "default"
+  s3Config: "s3-default"
+  authMount: "kubernetes-tenants"
+  secretsPrefix: "clusters/example"
+  routeNamespace: "registry-edge"
+  routeHost: "registry.example.test"
+  gatewayName: "registry-gw"
+  gatewayNamespace: "registry-edge"
+  gatewaySection: "https"
+  argocdNamespace: "argocd"
+  targetCluster: "in-cluster"
+  projectMode: "tenant"
+  sharedProject: ""
+  projectPrefix: "registry-"
+  repoURL: "oci://ghcr.io/pro-robotech/charts/registry-instance"
+  chart: "registry-instance"
+  allowedVersions: "1.0.0"
+  pluginName: ""
+  addonName: "registry-instance"
+  orderVariables: "id,login,registryUID,syncEpoch,public,bucket,endpoint,region,vaultSecretPath,vaultAuthMount,vaultRole"
+  allowedSyncOptions: "ServerSideApply=true,FailOnSharedResource=true"
+  platformPhase: "registry-platform"
+---
+# Source: registry-platform/templates/kaname-module.yaml
+# Манифест модуля registry для kaname: типы registry_registry и registry_repository,
+# роли registry.puller, registry.pusher, registry.admin с правилами на репозитории
+# (children) и личность модуля kacho-registry, под которой registry-operator
+# регистрирует ресурсы. Ключ — имя файла в каталоге доставки манифестов kaname.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: "registry-module-manifest"
+  namespace: "kaname"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+data:
+  registry.manifest.yaml: "# Манифест модуля registry для kaname (apiVersion iam/v1): типы ресурсов регистри,\n# роли выдачи и личность модуля. Доставляется ключом registry.manifest.yaml в каталог\n# манифестов kaname (README.md, «Манифест модуля kaname»).\n#\n# Раздел resources взят дословно у манифеста модуля в PRO-Robotech/kacho\n# (services/registry/manifest.yaml @741d340e3): его блоки сверяются с каноном модели\n# доступов kaname побайтово, и заметки (notes) входят в сверку.\n#\n# Роли — выдача на объект registry.registries:\u003cid\u003e (точечно) либо на всю область\n# iam.account с allInScope (каскадно, выдаёт платформа или владелец аккаунта): правило\n# верхнего уровня даёт глаголы на сам регистри, вложенное (children) — на каждый его\n# репозиторий, включая созданные позже, если репозиторий зарегистрирован с цепью\n# [registry_registry:\u003cid\u003e, project:\u003cprj\u003e].\n#\n# Личность модуля kacho-registry — та, под которой registry-operator регистрирует\n# registry_registry:\u003cid\u003e и registry_repository:\u003cid\u003e/\u003crepo\u003e (RegisterResource на\n# внутреннем листенере kaname по mTLS); вступление в module-relation-writers даёт ей\n# право писать кортежи владения. Аккаунт системы подставляет чарт\n# (kanameModule.systemAccount).\n\napiVersion: iam/v1\nmodule: registry\n\nresources:\n\n  - name: registries\n    objectType: registry_registry\n    parents: [project]\n    producer: derived\n    notes:\n      - before: v_get\n        text: |\n          # #64 Defect A: v_* derive from `owner` so a registry's CREATOR/OWNER (the\n          # RegisterResource `owner` tuple) holds the full CRUD verb-set on their own\n          # registry — esp. v_create (create repositories). Without this the owner got\n          # only editor-tier v_get/v_list/v_update/v_delete (the `edit` role authors no\n          # `create` verb) and CreateRepository denied → 404 for the owner. Per-OBJECT\n          # computed relation (like `editor: this or admin`), NOT a hierarchy cascade.\n          #\n          # `v_create` LIVES HERE AND NOWHERE ELSE — do not \"restore parity\" by adding it\n          # back to the other types. A registry is a CONTAINER: \"create a repository in\n          # this namespace\" is a real operation on the registry object, and it is really\n          # asked — by the control plane (CreateRepository / RenameRepository) and by the\n          # data plane (docker push to a new repo, cross-repo mount into a new dst, and\n          # the first-push blob-reveal guard). Every other type answered a question no\n          # request ever asks: \"create\" is not an operation on an already-existing object,\n          # and creating a resource inside a scope is authorized by the write tier on that\n          # scope. Locked by authzmap/verb_relation_has_reader_test.go, which reds with the\n          # type name if a reader-less carrier reappears.\n    relations:\n      - name: owner\n        definition: '[user, service_account]'\n        position: beforeTiers\n    verbs:\n      - {name: get, from: [owner, super_admin]}\n      - {name: list, from: [owner, super_admin]}\n      - {name: create, from: [owner, super_admin]}\n      - {name: update, from: [owner, super_admin]}\n      - {name: delete, from: [owner, super_admin]}\n      - {name: internalGetRegistryStats, class: get, internal: true}\n      - {name: internalTriggerGarbageCollection, class: delete, internal: true}\n\n  - name: repositories\n    objectType: registry_repository\n    parents:\n      - {name: parent, type: registry_registry}\n    producer: authored\n    notes:\n      - before: super_admin\n        text: |\n          # A repository has no project pointer of its own — it is a child of its\n          # registry, and the registry is the one anchored to a project.\n      - before: v_get\n        text: |\n          # RG-1 D-7: `user:*` public-read wildcard — anonymous pull of a PUBLIC repo.\n          # The wildcard grants v_get ONLY on repos that ALSO carry an explicit\n          # `user:* v_get` tuple emitted by the registry overlay (visibility=PUBLIC);\n          # absent that tuple `user:*` has no access → uniform 404. ONLY v_get gains\n          # the wildcard — no write relation does (anon is a read-only floor, B14).\n          # #64 Defect A: v_* derive from `owner` (repo creator/pusher owner-tuple) so\n          # the repo owner fully manages their own repository; `user:*` wildcard stays\n          # on v_get ONLY (anonymous public-read floor, B14).\n    relations:\n      - name: owner\n        definition: '[user, service_account]'\n        position: beforeTiers\n    verbs:\n      - {name: get, subjects: ['user:*', user, service_account, 'group#member'], from: [owner, super_admin]}\n      - {name: list, from: [owner, super_admin]}\n      - {name: update, from: [owner, super_admin]}\n      - {name: delete, from: [owner, super_admin]}\n\nroles:\n\n  - id: registry.puller\n    description: \u003e\n      Чтение образов реестра, названного целью выдачи, и каждого его\n      репозитория, включая созданные позже.\n    tier: {tierType: iam.cluster, tierId: cluster_root}\n    rules:\n      - module: registry\n        resources: [registries]\n        classes: [get]\n        children:\n          - resources: [repositories]\n            classes: [get, list]\n\n  - id: registry.pusher\n    description: \u003e\n      Публикация и чтение образов реестра, названного целью выдачи: новые\n      репозитории и запись в каждый его репозиторий.\n    tier: {tierType: iam.cluster, tierId: cluster_root}\n    rules:\n      - module: registry\n        resources: [registries]\n        classes: [get, create]\n        children:\n          - resources: [repositories]\n            classes: [get, list, update]\n\n  - id: registry.admin\n    description: \u003e\n      Управление реестром, названным целью выдачи, и всеми его\n      репозиториями.\n    tier: {tierType: iam.cluster, tierId: cluster_root}\n    rules:\n      - module: registry\n        resources: [registries]\n        classes: [get, list, create, update, delete]\n        children:\n          - resources: [repositories]\n            classes: [get, list, update, delete]\n\nseed:\n  serviceAccounts:\n    - name: kacho-registry\n      account: kacho-system\n      description: \"Module SA: kacho-registry (SEC-C least-priv)\"\n  joins:\n    - serviceAccount: {account: kacho-system, name: kacho-registry}\n      group: {account: kacho-system, name: module-relation-writers}\n      why: \"писать кортежи владения через iam, не ходя в хранилище прав напрямую (#914)\"\n"
+---
+# Source: registry-platform/templates/addonphase.yaml
+# Фаза Addon, которым площадка ставит этот чарт (addons-operator связывает AddonPhase с
+# Addon по имени). Объекты края — Gateway и общие маршруты — требуют видов Gateway API;
+# пока CRD не Established, базовый слой Addon площадки держит их выключенными, а это
+# правило подмешивает слой edge, как только CRD готова. keep защёлкивает правило:
+# переустановка CRD объекты края не снимает.
+apiVersion: addons.in-cloud.io/v1alpha1
+kind: AddonPhase
+metadata:
+  name: "registry-platform"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+spec:
+  rules:
+    - name: edge
+      criteria:
+        - source:
+            apiVersion: apiextensions.k8s.io/v1
+            kind: CustomResourceDefinition
+            name: "httproutes.gateway.networking.k8s.io"
+          jsonPath: "$.status.conditions[?@.type=='Established'].status"
+          operator: Equal
+          value: "True"
+          keep: true
+      selector:
+        name: edge
+        priority: 50
+        matchLabels:
+          addons.in-cloud.io/addon: "registry-platform"
+          addons.in-cloud.io/values: edge
+---
+# Source: registry-platform/templates/addontemplates.yaml
+# Форма Addon заказа для версии 1.0.0 чарта registry-instance. Её рендерит
+# addons-operator из AddonClaim и registry-operator — тем же контекстом ({.Values,
+# .Vars}, missingkey=error): версия, репозиторий и digest закреплены здесь, шаблон
+# заказа их не пишет. Переменные — ровно перечень слоя заказа.
+apiVersion: addons.in-cloud.io/v1alpha1
+kind: AddonTemplate
+metadata:
+  name: "registry-instance-1.0.0"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+    registry.in-cloud.io/chart: "registry-instance"
+    registry.in-cloud.io/chart-version: "1.0.0"
+  annotations:
+    registry.in-cloud.io/chart-digest: "sha256:1d6a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8"
+spec:
+  template: "spec:\n  backend:\n    finalizer: true\n    namespace: argocd\n    project: {{ printf \"%s%s\" \"registry-\" (.Vars.login | toString) | toJson }}\n    syncPolicy:\n      automated:\n        prune: true\n        selfHeal: true\n      retry:\n        backoff:\n          duration: 10s\n          factor: 2\n          maxDuration: 3m\n        limit: 5\n      syncOptions:\n      - ServerSideApply=true\n      - FailOnSharedResource=true\n    type: argocd\n  chart: registry-instance\n  releaseName: {{ printf \"zot-%s\" (.Vars.id | toString) | toJson }}\n  repoURL: oci://ghcr.io/pro-robotech/charts/registry-instance\n  targetCluster: in-cluster\n  targetNamespace: {{ .Vars.login | toString | toJson }}\n  valuesSelectors:\n  - matchLabels:\n      addons.in-cloud.io/addon: registry-instance\n      addons.in-cloud.io/values: order\n    name: order\n    priority: 0\n  - matchLabels:\n      addons.in-cloud.io/addon: registry-instance\n      addons.in-cloud.io/values: site\n    name: site\n    priority: 10\n  variables:\n    bucket: {{ .Vars.bucket | toString | toJson }}\n    endpoint: {{ .Vars.endpoint | toString | toJson }}\n    id: {{ .Vars.id | toString | toJson }}\n    login: {{ .Vars.login | toString | toJson }}\n    public: {{ .Vars.public | toString | toJson }}\n    region: {{ .Vars.region | toString | toJson }}\n    registryUID: {{ .Vars.registryUID | toString | toJson }}\n    syncEpoch: {{ .Vars.syncEpoch | toString | toJson }}\n    vaultAuthMount: {{ .Vars.vaultAuthMount | toString | toJson }}\n    vaultRole: {{ .Vars.vaultRole | toString | toJson }}\n    vaultSecretPath: {{ .Vars.vaultSecretPath | toString | toJson }}\n  version: 1.0.0"
+---
+# Source: registry-platform/templates/addonphase.yaml
+# Слой edge Addon площадки: включает Gateway и общие маршруты.
+apiVersion: addons.in-cloud.io/v1alpha1
+kind: AddonValue
+metadata:
+  name: "registry-platform-edge"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+    addons.in-cloud.io/addon: "registry-platform"
+    addons.in-cloud.io/values: edge
+spec:
+  values: "gateway:\n  enabled: true\nsharedRoutes:\n  enabled: true"
+---
+# Source: registry-platform/templates/addonvalues.yaml
+# Слой заказа (priority 0): переносит Addon.spec.variables в values чарта
+# registry-instance. Текст слоя — фиксированный файл чарта: только .Variables из
+# перечня и функции toJson, regexMatch и has; нечисловая эпоха и public не из
+# «true»/«false» остаются строкой, и схема registry-instance отвергает рендер. Значения переменных пишет registry-operator после
+# своей проверки.
+apiVersion: addons.in-cloud.io/v1alpha1
+kind: AddonValue
+metadata:
+  name: "registry-instance-order"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+    addons.in-cloud.io/addon: "registry-instance"
+    addons.in-cloud.io/values: order
+spec:
+  values: "instance:\n  id: {{ .Variables.id | toJson }}\n  login: {{ .Variables.login | toJson }}\n  registryUID: {{ .Variables.registryUID | toJson }}\n  syncEpoch: {{ if regexMatch \"^[0-9]{1,18}$\" .Variables.syncEpoch }}{{ .Variables.syncEpoch }}{{ else }}{{ .Variables.syncEpoch | toJson }}{{ end }}\n  public: {{ if has .Variables.public (list \"true\" \"false\") }}{{ .Variables.public }}{{ else }}{{ .Variables.public | toJson }}{{ end }}\nstorage:\n  bucket: {{ .Variables.bucket | toJson }}\n  endpoint: {{ .Variables.endpoint | toJson }}\n  region: {{ .Variables.region | toJson }}\nvault:\n  secretPath: {{ .Variables.vaultSecretPath | toJson }}\n  authMount: {{ .Variables.vaultAuthMount | toJson }}\n  role: {{ .Variables.vaultRole | toJson }}\n"
+---
+# Source: registry-platform/templates/addonvalues.yaml
+# Слой площадки (priority 10): константы site.* — CA, адреса Vault, публичного API kaname
+# и эндпоинта регистрации registry-operator, образы по digest, сеть, край. Данные без исполняемого текста.
+apiVersion: addons.in-cloud.io/v1alpha1
+kind: AddonValue
+metadata:
+  name: "registry-instance-site"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+    addons.in-cloud.io/addon: "registry-instance"
+    addons.in-cloud.io/values: site
+spec:
+  values: "site:\n  caBundle:\n    configMap: platform-ca\n    key: ca.crt\n  edge:\n    proxy:\n      gateway:\n        name: registry-gw\n        namespace: registry-edge\n      namespace: envoy-gateway-system\n  iamProxy:\n    decisionCacheTTL: 10s\n  images:\n    iamProxy:\n      digest: sha256:2e7b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809\n      repository: docker.io/prorobotech/registry-iam-proxy\n      tag: v0.1.0\n    zot:\n      digest: sha256:95a837a0afacf5b7edc0c92493f04beee6891989b8d2fd50a00cf65a1e6d4fd5\n      repository: ghcr.io/project-zot/zot-linux-amd64\n      tag: v2.1.20\n  kaname:\n    apiURL: https://kaname.example.test\n    audience: registry\n    issuer: https://kaname.example.test\n    jwksURL: https://kaname.example.test:9097/.well-known/jwks.json\n  network:\n    allowKubeletProbes: false\n    dns:\n      labels:\n        k8s-app: kube-dns\n      namespace: kube-system\n    kaname:\n    - fqdn: kaname.example.test\n      ports:\n      - 443\n      - 9097\n    registryOperator:\n    - labels:\n        app.kubernetes.io/name: registry-operator\n      namespace: registry-system\n      ports:\n      - 9443\n    vault:\n    - labels:\n        app.kubernetes.io/name: vault\n      namespace: vault\n      ports:\n      - 8200\n  registryOperator:\n    registrationURL: https://registry-operator.registry-system.svc:9443/v1/repositories\n    tokenAudience: registry-operator\n  resources:\n    iamProxy:\n      limits:\n        memory: 128Mi\n      requests:\n        cpu: 20m\n        memory: 32Mi\n    scratchSizeLimit: 2Gi\n    vaultAgent:\n      limits:\n        cpu: 100m\n        memory: 64Mi\n      requests:\n        cpu: 10m\n        memory: 32Mi\n    zot:\n      limits:\n        memory: 1Gi\n      requests:\n        cpu: 100m\n        memory: 256Mi\n  vault:\n    address: https://vault.vault.svc:8200\n    tokenAudience: vault"
+---
+# Source: registry-platform/templates/appprojects.yaml
+# ПОКА БЕЗ (выключено по умолчанию): проект Argo CD арендатора. Ровно один destination —
+# его namespace; уровня кластера ничего; из видов — только рабочая нагрузка zot.
+# Подменённый чарт с чужим metadata.namespace проект не пропустит.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: "registry-cust01"
+  namespace: "argocd"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+    registry.in-cloud.io/tenant: "cust01"
+spec:
+  description: "On-demand registries of tenant cust01"
+  sourceRepos:
+    - "oci://ghcr.io/pro-robotech/charts/registry-instance"
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: "cust01"
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+    - group: ""
+      kind: ServiceAccount
+    - group: ""
+      kind: Service
+    - group: apps
+      kind: Deployment
+    - group: cilium.io
+      kind: CiliumNetworkPolicy
+---
+# Source: registry-platform/templates/appprojects.yaml
+# ПОКА БЕЗ (выключено по умолчанию): проект Argo CD арендатора. Ровно один destination —
+# его namespace; уровня кластера ничего; из видов — только рабочая нагрузка zot.
+# Подменённый чарт с чужим metadata.namespace проект не пропустит.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: "registry-cust02"
+  namespace: "argocd"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+    registry.in-cloud.io/tenant: "cust02"
+spec:
+  description: "On-demand registries of tenant cust02"
+  sourceRepos:
+    - "oci://ghcr.io/pro-robotech/charts/registry-instance"
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: "cust02"
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+    - group: ""
+      kind: ServiceAccount
+    - group: ""
+      kind: Service
+    - group: apps
+      kind: Deployment
+    - group: cilium.io
+      kind: CiliumNetworkPolicy
+---
+# Source: registry-platform/templates/gateway.yaml
+# Gateway края. Принимает только HTTPRoute и только из namespace с метками края:
+# маршрутов из namespace арендаторов он не берёт.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: "registry-gw"
+  namespace: "registry-edge"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+spec:
+  gatewayClassName: "envoy-gateway"
+  listeners:
+    - name: "https"
+      protocol: HTTPS
+      port: 443
+      hostname: "registry.example.test"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - group: ""
+            kind: Secret
+            name: "registry-edge-tls"
+      allowedRoutes:
+        kinds:
+          - group: gateway.networking.k8s.io
+            kind: HTTPRoute
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels: {"registry.in-cloud.io/edge":"true"}
+---
+# Source: registry-platform/templates/shared-routes.yaml
+# Общий маршрут края /v2/: один на кластер, на все регистри.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: "registry-api-root"
+  namespace: "registry-edge"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: "registry-gw"
+      namespace: "registry-edge"
+      sectionName: "https"
+  hostnames:
+    - "registry.example.test"
+  rules:
+    - matches:
+        - path:
+            type: "Exact"
+            value: "/v2/"
+      backendRefs:
+        - group: ""
+          kind: Service
+          namespace: "registry-system"
+          name: "registry-api-root"
+          port: 8080
+---
+# Source: registry-platform/templates/shared-routes.yaml
+# Общий маршрут края /iam/token: один на кластер, на все регистри.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: "registry-token"
+  namespace: "registry-edge"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: "registry-gw"
+      namespace: "registry-edge"
+      sectionName: "https"
+  hostnames:
+    - "registry.example.test"
+  rules:
+    - matches:
+        - path:
+            type: "Exact"
+            value: "/iam/token"
+      backendRefs:
+        - group: ""
+          kind: Service
+          namespace: "kaname"
+          name: "kaname-token"
+          port: 8080
+---
+# Source: registry-platform/templates/shared-routes.yaml
+# Разрешение общим маршрутам края ссылаться на Service в kaname — и только на названные.
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: registry-edge-routes
+  namespace: "kaname"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: "registry-edge"
+  to:
+    - group: ""
+      kind: Service
+      name: "kaname-token"
+---
+# Source: registry-platform/templates/shared-routes.yaml
+# Разрешение общим маршрутам края ссылаться на Service в registry-system — и только на названные.
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: registry-edge-routes
+  namespace: "registry-system"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: "registry-edge"
+  to:
+    - group: ""
+      kind: Service
+      name: "registry-api-root"
+---
+# Source: registry-platform/templates/admission.yaml
+# ПОКА БЕЗ (выключено по умолчанию): политика V1.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: "v1-registry-iam"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+    registry.in-cloud.io/policy: "v1"
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: v1
+    kind: ConfigMap
+  matchConstraints:
+    namespaceSelector:
+      matchLabels: {"registry.in-cloud.io/tenant":"true"}
+    resourceRules:
+      - apiGroups: ["iam.kaname.in-cloud.io"]
+        apiVersions: ["*"]
+        resources: ["serviceaccounts","accessbindings"]
+        operations: ["CREATE","UPDATE","DELETE"]
+  matchConditions:
+    - name: subject
+      expression: "(request.operation == 'DELETE' ? oldObject : object).metadata.name.startsWith('zot-')"
+  variables:
+    - name: "isOp"
+      expression: "request.userInfo.username == params.data.registryOperator"
+    - name: "isPlatform"
+      expression: "request.userInfo.username in params.data.platformUsers.split(',') || request.userInfo.groups.exists(g, g in params.data.platformGroups.split(','))"
+    - name: "o"
+      expression: "request.operation == 'DELETE' ? oldObject : object"
+    - name: "id"
+      expression: "variables.o.metadata.?labels[?'registry.in-cloud.io/id'].orValue('')"
+  validations:
+    - expression: "variables.isOp || variables.isPlatform || (request.operation == 'UPDATE' \u0026\u0026 (has(object.spec) == has(oldObject.spec) \u0026\u0026 (!has(object.spec) || object.spec == oldObject.spec)) \u0026\u0026 (has(object.metadata.labels) == has(oldObject.metadata.labels) \u0026\u0026 (!has(object.metadata.labels) || object.metadata.labels == oldObject.metadata.labels)))"
+      message: "zot-* IAM objects are written only by registry-operator; other writers may change only metadata outside labels"
+      reason: Forbidden
+    - expression: "request.operation == 'DELETE' || !variables.isOp || (variables.id != '' \u0026\u0026 variables.o.metadata.name.startsWith('zot-' + variables.id + '-') \u0026\u0026 variables.o.metadata.?labels[?'registry.in-cloud.io/namespace'].orValue('') == request.namespace)"
+      message: "a zot-\u003cid\u003e-* IAM object carries its id and namespace labels"
+      reason: Forbidden
+    - expression: "request.resource.resource != 'accessbindings' || request.operation == 'DELETE' || !variables.isOp || (object.spec.roleRef.name in params.data.allowedRoles.split(',') \u0026\u0026 size(object.spec.target.resources) == 1 \u0026\u0026 object.spec.target.resources[0].type == 'registry.registries' \u0026\u0026 object.spec.target.resources[0].id == variables.id \u0026\u0026 object.spec.subjects.all(s, has(s.serviceAccountRef) \u0026\u0026 s.serviceAccountRef.name.startsWith('zot-' + variables.id + '-')))"
+      message: "a registry binding grants an allowed role on its own registry to its own robots only"
+      reason: Forbidden
+---
+# Source: registry-platform/templates/admission.yaml
+# ПОКА БЕЗ (выключено по умолчанию): политика V2.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: "v2-registry-status"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+    registry.in-cloud.io/policy: "v2"
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: v1
+    kind: ConfigMap
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["registry.in-cloud.io"]
+        apiVersions: ["*"]
+        resources: ["registries/status","registryidreservations/status"]
+        operations: ["UPDATE"]
+  variables:
+    - name: "isOp"
+      expression: "request.userInfo.username == params.data.registryOperator"
+    - name: "isPlatform"
+      expression: "request.userInfo.username in params.data.platformUsers.split(',') || request.userInfo.groups.exists(g, g in params.data.platformGroups.split(','))"
+  validations:
+    - expression: "variables.isPlatform || variables.isOp"
+      message: "registry and reservation status are written only by registry-operator"
+      reason: Forbidden
+---
+# Source: registry-platform/templates/admission.yaml
+# ПОКА БЕЗ (выключено по умолчанию): политика V3.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: "v3-registry-route"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+    registry.in-cloud.io/policy: "v3"
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: v1
+    kind: ConfigMap
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["gateway.networking.k8s.io"]
+        apiVersions: ["*"]
+        resources: ["httproutes"]
+        operations: ["CREATE","UPDATE","DELETE"]
+  matchConditions:
+    - name: subject
+      expression: "(request.operation == 'DELETE' ? oldObject : object).metadata.name.startsWith('zot-')"
+  variables:
+    - name: "isOp"
+      expression: "request.userInfo.username == params.data.registryOperator"
+    - name: "isPlatform"
+      expression: "request.userInfo.username in params.data.platformUsers.split(',') || request.userInfo.groups.exists(g, g in params.data.platformGroups.split(','))"
+    - name: "id"
+      expression: "(request.operation == 'DELETE' ? oldObject : object).metadata.?labels[?'registry.in-cloud.io/id'].orValue('')"
+  validations:
+    - expression: "variables.isOp || variables.isPlatform || (request.operation == 'UPDATE' \u0026\u0026 (has(object.spec) == has(oldObject.spec) \u0026\u0026 (!has(object.spec) || object.spec == oldObject.spec)) \u0026\u0026 (has(object.metadata.labels) == has(oldObject.metadata.labels) \u0026\u0026 (!has(object.metadata.labels) || object.metadata.labels == oldObject.metadata.labels)))"
+      message: "zot-* routes are written only by registry-operator"
+      reason: Forbidden
+    - expression: "request.operation == 'DELETE' || !variables.isOp || (request.namespace == params.data.routeNamespace \u0026\u0026 variables.id != '' \u0026\u0026 object.metadata.name == 'zot-' + variables.id \u0026\u0026 object.spec.?hostnames.orValue([]) == [params.data.routeHost] \u0026\u0026 size(object.spec.parentRefs) == 1 \u0026\u0026 object.spec.parentRefs[0].name == params.data.gatewayName \u0026\u0026 object.spec.parentRefs[0].?namespace.orValue(request.namespace) == params.data.gatewayNamespace \u0026\u0026 object.spec.parentRefs[0].?sectionName.orValue('') == params.data.gatewaySection \u0026\u0026 size(object.spec.rules) == 1 \u0026\u0026 !has(object.spec.rules[0].filters) \u0026\u0026 size(object.spec.rules[0].matches) == 1 \u0026\u0026 object.spec.rules[0].matches[0].path.type == 'PathPrefix' \u0026\u0026 object.spec.rules[0].matches[0].path.value == '/v2/' + variables.id + '/' \u0026\u0026 size(object.spec.rules[0].backendRefs) == 1 \u0026\u0026 object.spec.rules[0].backendRefs[0].?kind.orValue('Service') == 'Service' \u0026\u0026 object.spec.rules[0].backendRefs[0].?group.orValue('') == '' \u0026\u0026 object.spec.rules[0].backendRefs[0].name == 'zot-' + variables.id \u0026\u0026 object.spec.rules[0].backendRefs[0].?namespace.orValue(request.namespace) == object.metadata.?labels[?'registry.in-cloud.io/namespace'].orValue('') \u0026\u0026 object.spec.rules[0].backendRefs[0].?port.orValue(0) == 8080)"
+      message: "a registry route is /v2/\u003cid\u003e/ on the registry host and gateway, to Service zot-\u003cid\u003e:8080 of its tenant"
+      reason: Forbidden
+---
+# Source: registry-platform/templates/admission.yaml
+# ПОКА БЕЗ (выключено по умолчанию): политика V4.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: "v4-registry-zot-pods"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+    registry.in-cloud.io/policy: "v4"
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: v1
+    kind: ConfigMap
+  matchConstraints:
+    namespaceSelector:
+      matchLabels: {"registry.in-cloud.io/tenant":"true"}
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["*"]
+        resources: ["pods"]
+        operations: ["CREATE"]
+  matchConditions:
+    - name: subject
+      expression: "object.spec.?serviceAccountName.orValue('').startsWith('zot-')"
+  variables:
+    - name: "isOp"
+      expression: "request.userInfo.username == params.data.registryOperator"
+    - name: "isPlatform"
+      expression: "request.userInfo.username in params.data.platformUsers.split(',') || request.userInfo.groups.exists(g, g in params.data.platformGroups.split(','))"
+  validations:
+    - expression: "variables.isPlatform || request.userInfo.username == params.data.replicaSetController"
+      message: "pods of zot-* service accounts are created only by their Deployment"
+      reason: Forbidden
+---
+# Source: registry-platform/templates/admission.yaml
+# ПОКА БЕЗ (выключено по умолчанию): политика V5.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: "v5-registry-tenant-namespaces"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+    registry.in-cloud.io/policy: "v5"
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: v1
+    kind: ConfigMap
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["*"]
+        resources: ["namespaces"]
+        operations: ["CREATE","UPDATE"]
+  variables:
+    - name: "isOp"
+      expression: "request.userInfo.username == params.data.registryOperator"
+    - name: "isPlatform"
+      expression: "request.userInfo.username in params.data.platformUsers.split(',') || request.userInfo.groups.exists(g, g in params.data.platformGroups.split(','))"
+  validations:
+    - expression: "variables.isPlatform || (object.metadata.?labels[?'registry.in-cloud.io/tenant'].orValue('') == (request.operation == 'CREATE' ? '' : oldObject.metadata.?labels[?'registry.in-cloud.io/tenant'].orValue('')))"
+      message: "tenant namespace labels are set only by the platform"
+      reason: Forbidden
+---
+# Source: registry-platform/templates/admission.yaml
+# ПОКА БЕЗ (выключено по умолчанию): политика V6.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: "v6-registry-reservations"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+    registry.in-cloud.io/policy: "v6"
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: v1
+    kind: ConfigMap
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["registry.in-cloud.io"]
+        apiVersions: ["*"]
+        resources: ["registryidreservations"]
+        operations: ["CREATE","UPDATE","DELETE"]
+  variables:
+    - name: "isOp"
+      expression: "request.userInfo.username == params.data.registryOperator"
+    - name: "isPlatform"
+      expression: "request.userInfo.username in params.data.platformUsers.split(',') || request.userInfo.groups.exists(g, g in params.data.platformGroups.split(','))"
+  validations:
+    - expression: "variables.isPlatform || (request.operation == 'CREATE' \u0026\u0026 variables.isOp) || (request.operation == 'UPDATE' \u0026\u0026 (variables.isOp || ((has(object.spec) == has(oldObject.spec) \u0026\u0026 (!has(object.spec) || object.spec == oldObject.spec)) \u0026\u0026 (has(object.metadata.labels) == has(oldObject.metadata.labels) \u0026\u0026 (!has(object.metadata.labels) || object.metadata.labels == oldObject.metadata.labels)))))"
+      message: "reservations are created by registry-operator and removed only by the platform"
+      reason: Forbidden
+---
+# Source: registry-platform/templates/admission.yaml
+# ПОКА БЕЗ (выключено по умолчанию): политика V7.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: "v7-registry-annotations"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+    registry.in-cloud.io/policy: "v7"
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: v1
+    kind: ConfigMap
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["registry.in-cloud.io"]
+        apiVersions: ["*"]
+        resources: ["registries"]
+        operations: ["CREATE","UPDATE"]
+  variables:
+    - name: "isOp"
+      expression: "request.userInfo.username == params.data.registryOperator"
+    - name: "isPlatform"
+      expression: "request.userInfo.username in params.data.platformUsers.split(',') || request.userInfo.groups.exists(g, g in params.data.platformGroups.split(','))"
+    - name: "na"
+      expression: "object.metadata.?annotations.orValue({})"
+    - name: "oa"
+      expression: "request.operation == 'CREATE' ? {} : oldObject.metadata.?annotations.orValue({})"
+  validations:
+    - expression: "variables.isPlatform || variables.isOp || (variables.na.all(k, !k.startsWith('registry.in-cloud.io/') || (k in variables.oa \u0026\u0026 variables.oa[k] == variables.na[k])) \u0026\u0026 variables.oa.all(k, !k.startsWith('registry.in-cloud.io/') || k in variables.na))"
+      message: "registry.in-cloud.io/ annotations of a Registry are set only by the platform"
+      reason: Forbidden
+---
+# Source: registry-platform/templates/admission.yaml
+# ПОКА БЕЗ (выключено по умолчанию): политика V8.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: "v8-registry-zot-workload"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+    registry.in-cloud.io/policy: "v8"
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: v1
+    kind: ConfigMap
+  matchConstraints:
+    namespaceSelector:
+      matchLabels: {"registry.in-cloud.io/tenant":"true"}
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["*"]
+        resources: ["serviceaccounts","services"]
+        operations: ["CREATE","UPDATE","DELETE"]
+      - apiGroups: ["apps"]
+        apiVersions: ["*"]
+        resources: ["deployments"]
+        operations: ["CREATE","UPDATE","DELETE"]
+      - apiGroups: ["cilium.io"]
+        apiVersions: ["*"]
+        resources: ["ciliumnetworkpolicies"]
+        operations: ["CREATE","UPDATE","DELETE"]
+  matchConditions:
+    - name: subject
+      expression: "(request.operation == 'DELETE' ? oldObject : object).metadata.name.startsWith('zot-')"
+  variables:
+    - name: "isOp"
+      expression: "request.userInfo.username == params.data.registryOperator"
+    - name: "isPlatform"
+      expression: "request.userInfo.username in params.data.platformUsers.split(',') || request.userInfo.groups.exists(g, g in params.data.platformGroups.split(','))"
+    - name: "isArgo"
+      expression: "request.userInfo.username == params.data.argoController"
+  validations:
+    - expression: "request.operation != 'CREATE' || variables.isArgo || variables.isPlatform"
+      message: "zot-* workload objects are created only by Argo CD"
+      reason: Forbidden
+    - expression: "request.operation != 'UPDATE' || variables.isArgo || variables.isPlatform || ((request.resource.resource == 'serviceaccounts' ? ((has(object.automountServiceAccountToken) == has(oldObject.automountServiceAccountToken) \u0026\u0026 (!has(object.automountServiceAccountToken) || object.automountServiceAccountToken == oldObject.automountServiceAccountToken)) \u0026\u0026 (has(object.secrets) == has(oldObject.secrets) \u0026\u0026 (!has(object.secrets) || object.secrets == oldObject.secrets)) \u0026\u0026 (has(object.imagePullSecrets) == has(oldObject.imagePullSecrets) \u0026\u0026 (!has(object.imagePullSecrets) || object.imagePullSecrets == oldObject.imagePullSecrets))) : (has(object.spec) == has(oldObject.spec) \u0026\u0026 (!has(object.spec) || object.spec == oldObject.spec))) \u0026\u0026 (has(object.metadata.labels) == has(oldObject.metadata.labels) \u0026\u0026 (!has(object.metadata.labels) || object.metadata.labels == oldObject.metadata.labels)) \u0026\u0026 (has(object.metadata.ownerReferences) == has(oldObject.metadata.ownerReferences) \u0026\u0026 (!has(object.metadata.ownerReferences) || object.metadata.ownerReferences == oldObject.metadata.ownerReferences)))"
+      message: "zot-* workload objects are changed only by Argo CD; other writers may change only metadata outside labels"
+      reason: Forbidden
+    - expression: "request.operation != 'DELETE' || variables.isArgo || variables.isPlatform || request.userInfo.username in [params.data.namespaceController, params.data.garbageCollector]"
+      message: "zot-* workload objects are deleted only by Argo CD or with their namespace"
+      reason: Forbidden
+---
+# Source: registry-platform/templates/admission.yaml
+# ПОКА БЕЗ (выключено по умолчанию): политика V9.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: "v9-registry-tracking"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+    registry.in-cloud.io/policy: "v9"
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: v1
+    kind: ConfigMap
+  matchConstraints:
+    namespaceSelector:
+      matchLabels: {"registry.in-cloud.io/tenant":"true"}
+    resourceRules:
+      - apiGroups: ["*"]
+        apiVersions: ["*"]
+        resources: ["*"]
+        operations: ["CREATE","UPDATE"]
+  variables:
+    - name: "isOp"
+      expression: "request.userInfo.username == params.data.registryOperator"
+    - name: "isPlatform"
+      expression: "request.userInfo.username in params.data.platformUsers.split(',') || request.userInfo.groups.exists(g, g in params.data.platformGroups.split(','))"
+    - name: "nt"
+      expression: "object.metadata.?annotations[?'argocd.argoproj.io/tracking-id'].orValue('')"
+    - name: "ot"
+      expression: "request.operation == 'CREATE' ? '' : oldObject.metadata.?annotations[?'argocd.argoproj.io/tracking-id'].orValue('')"
+  validations:
+    - expression: "variables.nt == variables.ot || (!variables.nt.startsWith('reg-') \u0026\u0026 !variables.ot.startsWith('reg-')) || request.userInfo.username == params.data.argoController || variables.isPlatform"
+      message: "the Argo CD tracking mark of a registry Application is set only by Argo CD"
+      reason: Forbidden
+---
+# Source: registry-platform/templates/admission.yaml
+# ПОКА БЕЗ (выключено по умолчанию): политика V10.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: "v10-registry-addons"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+    registry.in-cloud.io/policy: "v10"
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: v1
+    kind: ConfigMap
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["addons.in-cloud.io"]
+        apiVersions: ["*"]
+        resources: ["addons"]
+        operations: ["CREATE","UPDATE","DELETE"]
+  variables:
+    - name: "isOp"
+      expression: "request.userInfo.username == params.data.registryOperator"
+    - name: "isPlatform"
+      expression: "request.userInfo.username in params.data.platformUsers.split(',') || request.userInfo.groups.exists(g, g in params.data.platformGroups.split(','))"
+    - name: "o"
+      expression: "request.operation == 'DELETE' ? oldObject : object"
+    - name: "reg"
+      expression: "variables.o.metadata.name.startsWith('reg-')"
+    - name: "id"
+      expression: "variables.o.metadata.?labels[?'registry.in-cloud.io/id'].orValue('')"
+    - name: "login"
+      expression: "variables.o.metadata.?labels[?'registry.in-cloud.io/namespace'].orValue('')"
+    - name: "vars"
+      expression: "request.operation == 'DELETE' ? {} : object.spec.?variables.orValue({})"
+  validations:
+    - expression: "variables.isPlatform || (variables.reg ? (variables.isOp || (request.operation == 'UPDATE' \u0026\u0026 (has(object.spec) == has(oldObject.spec) \u0026\u0026 (!has(object.spec) || object.spec == oldObject.spec)))) : !variables.isOp)"
+      message: "reg-* Addons are written only by registry-operator, and registry-operator writes only reg-* Addons"
+      reason: Forbidden
+    - expression: "request.operation == 'DELETE' || !variables.isOp || (variables.id != '' \u0026\u0026 variables.login != '' \u0026\u0026 object.metadata.name == 'reg-' + variables.id \u0026\u0026 object.spec.targetCluster == params.data.targetCluster \u0026\u0026 object.spec.targetNamespace == variables.login \u0026\u0026 object.spec.backend.type == 'argocd' \u0026\u0026 object.spec.backend.namespace == params.data.argocdNamespace \u0026\u0026 object.spec.backend.?finalizer.orValue(false) \u0026\u0026 object.spec.backend.?project.orValue('') == (params.data.projectMode == 'tenant' ? params.data.projectPrefix + variables.login : params.data.sharedProject))"
+      message: "a registry Addon deploys into its tenant namespace through the platform Argo CD project"
+      reason: Forbidden
+    - expression: "request.operation == 'DELETE' || !variables.isOp || (object.spec.repoURL == params.data.repoURL \u0026\u0026 object.spec.?chart.orValue('') == params.data.chart \u0026\u0026 object.spec.version in params.data.allowedVersions.split(',') \u0026\u0026 object.spec.?pluginName.orValue('') == params.data.pluginName \u0026\u0026 !has(object.spec.path) \u0026\u0026 size(object.spec.?valuesSources.orValue([])) == 0 \u0026\u0026 size(object.spec.?initDependencies.orValue([])) == 0)"
+      message: "a registry Addon uses a pinned version of the registry-instance chart and reads no cluster objects"
+      reason: Forbidden
+    - expression: "request.operation == 'DELETE' || !variables.isOp || (params.data.orderVariables.split(',').all(k, k in variables.vars) \u0026\u0026 variables.vars.all(k, k in params.data.orderVariables.split(',') \u0026\u0026 !variables.vars[k].contains('{{') \u0026\u0026 !variables.vars[k].contains('\u003cpath:')) \u0026\u0026 variables.vars['id'] == variables.id \u0026\u0026 variables.vars['login'] == variables.login \u0026\u0026 variables.vars['vaultRole'] == 'zot-' + variables.id)"
+      message: "registry Addon variables are exactly the order variables of its own order"
+      reason: Forbidden
+    - expression: "request.operation == 'DELETE' || !variables.isOp || (size(object.spec.?valuesSelectors.orValue([])) == 2 \u0026\u0026 object.spec.valuesSelectors.all(s, s.matchLabels.size() == 2 \u0026\u0026 s.matchLabels[?'addons.in-cloud.io/addon'].orValue('') == params.data.addonName \u0026\u0026 s.matchLabels[?'addons.in-cloud.io/values'].orValue('') in ['order', 'site']))"
+      message: "a registry Addon selects only the platform order and site layers"
+      reason: Forbidden
+    - expression: "request.operation == 'DELETE' || !variables.isOp || (!has(object.spec.backend.syncPolicy) || (!has(object.spec.backend.syncPolicy.managedNamespaceMetadata) \u0026\u0026 object.spec.backend.syncPolicy.?syncOptions.orValue([]).all(x, x in params.data.allowedSyncOptions.split(',')) \u0026\u0026 object.spec.backend.syncPolicy.?retry.?limit.orValue(0) \u003c= 10)) \u0026\u0026 size(object.spec.backend.?ignoreDifferences.orValue([])) == 0"
+      message: "a registry Addon uses only the allowed sync options and ignores no differences"
+      reason: Forbidden
+---
+# Source: registry-platform/templates/admission.yaml
+# ПОКА БЕЗ (выключено по умолчанию): политика V11.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: "v11-registry-addonvalues"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+    registry.in-cloud.io/policy: "v11"
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: v1
+    kind: ConfigMap
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["addons.in-cloud.io"]
+        apiVersions: ["*"]
+        resources: ["addonvalues"]
+        operations: ["CREATE","UPDATE","DELETE"]
+  variables:
+    - name: "isOp"
+      expression: "request.userInfo.username == params.data.registryOperator"
+    - name: "isPlatform"
+      expression: "request.userInfo.username in params.data.platformUsers.split(',') || request.userInfo.groups.exists(g, g in params.data.platformGroups.split(','))"
+    - name: "layer"
+      expression: "(request.operation == 'DELETE' ? oldObject : object).metadata.?labels[?'addons.in-cloud.io/addon'].orValue('')"
+  validations:
+    - expression: "variables.layer != params.data.addonName || variables.isPlatform"
+      message: "registry-instance value layers are written only by the platform"
+      reason: Forbidden
+    - expression: "request.operation == 'DELETE' || variables.layer != params.data.addonName || (!object.spec.values.contains('\u003cpath:') \u0026\u0026 !object.spec.values.contains('argocdPlugins'))"
+      message: "registry-instance value layers carry no secret-plugin substitutions"
+      reason: Forbidden
+---
+# Source: registry-platform/templates/admission.yaml
+# ПОКА БЕЗ (выключено по умолчанию): политика V12.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: "v12-registry-addonphases"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+    registry.in-cloud.io/policy: "v12"
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: v1
+    kind: ConfigMap
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["addons.in-cloud.io"]
+        apiVersions: ["*"]
+        resources: ["addonphases"]
+        operations: ["CREATE","UPDATE"]
+  variables:
+    - name: "isOp"
+      expression: "request.userInfo.username == params.data.registryOperator"
+    - name: "isPlatform"
+      expression: "request.userInfo.username in params.data.platformUsers.split(',') || request.userInfo.groups.exists(g, g in params.data.platformGroups.split(','))"
+  validations:
+    - expression: "!object.metadata.name.startsWith('reg-')"
+      message: "registry Addons have no phase: their order is driven by registry-operator"
+      reason: Forbidden
+    - expression: "object.metadata.name != params.data.platformPhase || variables.isPlatform"
+      message: "the registry platform phase is written only by the platform"
+      reason: Forbidden
+---
+# Source: registry-platform/templates/admission.yaml
+# ПОКА БЕЗ (выключено по умолчанию): политика V13.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: "v13-registry-appprojects"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+    registry.in-cloud.io/policy: "v13"
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: v1
+    kind: ConfigMap
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["argoproj.io"]
+        apiVersions: ["*"]
+        resources: ["appprojects"]
+        operations: ["CREATE","UPDATE","DELETE"]
+  matchConditions:
+    - name: subject
+      expression: "(request.operation == 'DELETE' ? oldObject : object).metadata.name.startsWith('registry-')"
+  variables:
+    - name: "isOp"
+      expression: "request.userInfo.username == params.data.registryOperator"
+    - name: "isPlatform"
+      expression: "request.userInfo.username in params.data.platformUsers.split(',') || request.userInfo.groups.exists(g, g in params.data.platformGroups.split(','))"
+  validations:
+    - expression: "variables.isPlatform || (request.operation == 'UPDATE' \u0026\u0026 (has(object.spec) == has(oldObject.spec) \u0026\u0026 (!has(object.spec) || object.spec == oldObject.spec)))"
+      message: "registry Argo CD projects are written only by the platform"
+      reason: Forbidden
+    - expression: "request.operation == 'DELETE' || (!has(object.spec.sourceNamespaces) \u0026\u0026 size(object.spec.?clusterResourceWhitelist.orValue([])) == 0 \u0026\u0026 object.spec.?sourceRepos.orValue([]) == [params.data.repoURL] \u0026\u0026 size(object.spec.?destinations.orValue([])) == 1 \u0026\u0026 object.spec.destinations[0].?server.orValue('') == 'https://kubernetes.default.svc' \u0026\u0026 object.spec.destinations[0].?namespace.orValue('') == object.metadata.name.substring(size(params.data.projectPrefix)) \u0026\u0026 object.spec.?namespaceResourceWhitelist.orValue([]).all(r, (r.group == '' \u0026\u0026 r.kind in ['ServiceAccount', 'Service']) || (r.group == 'apps' \u0026\u0026 r.kind == 'Deployment') || (r.group == 'cilium.io' \u0026\u0026 r.kind == 'CiliumNetworkPolicy')))"
+      message: "a registry project deploys only the zot workload from the registry-instance chart into its own tenant namespace"
+      reason: Forbidden
+---
+# Source: registry-platform/templates/admission.yaml
+# ПОКА БЕЗ (выключено по умолчанию): политика V14.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: "v14-registry-vault-claims"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+    registry.in-cloud.io/policy: "v14"
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: v1
+    kind: ConfigMap
+  matchConstraints:
+    namespaceSelector:
+      matchLabels: {"registry.in-cloud.io/tenant":"true"}
+    resourceRules:
+      - apiGroups: ["vault.in-cloud.io"]
+        apiVersions: ["*"]
+        resources: ["vaultclaims","s3bucketclaims"]
+        operations: ["CREATE","UPDATE","DELETE"]
+  matchConditions:
+    - name: subject
+      expression: "(request.operation == 'DELETE' ? oldObject : object).metadata.name.startsWith('zot-')"
+  variables:
+    - name: "isOp"
+      expression: "request.userInfo.username == params.data.registryOperator"
+    - name: "isPlatform"
+      expression: "request.userInfo.username in params.data.platformUsers.split(',') || request.userInfo.groups.exists(g, g in params.data.platformGroups.split(','))"
+  validations:
+    - expression: "variables.isOp || variables.isPlatform || (request.operation == 'UPDATE' \u0026\u0026 (has(object.spec) == has(oldObject.spec) \u0026\u0026 (!has(object.spec) || object.spec == oldObject.spec)) \u0026\u0026 (has(object.metadata.labels) == has(oldObject.metadata.labels) \u0026\u0026 (!has(object.metadata.labels) || object.metadata.labels == oldObject.metadata.labels)))"
+      message: "zot-* Vault claims are written only by registry-operator; other writers may change only metadata outside labels"
+      reason: Forbidden
+    - expression: "request.resource.resource != 'vaultclaims' || request.operation == 'DELETE' || !variables.isOp || (object.spec.vaultConfigRef.name == params.data.vaultConfig \u0026\u0026 object.spec.secretsPrefix == params.data.secretsPrefix \u0026\u0026 object.spec.auth.mountPath == params.data.authMount \u0026\u0026 has(object.spec.auth.manageConfig) \u0026\u0026 !object.spec.auth.manageConfig \u0026\u0026 !object.spec.auth.?autoCreate.orValue(false) \u0026\u0026 object.spec.auth.?rolePruning.orValue('') == 'Owned' \u0026\u0026 !has(object.spec.transit) \u0026\u0026 !has(object.spec.clusterRef) \u0026\u0026 size(object.spec.roles) == 1 \u0026\u0026 object.spec.roles[0].name == object.metadata.name \u0026\u0026 object.spec.roles[0].boundServiceAccounts.?names.orValue([]) == [object.metadata.name] \u0026\u0026 object.spec.roles[0].boundServiceAccounts.namespace == request.namespace \u0026\u0026 object.spec.roles[0].?policies.orValue([]).all(p, object.spec.?policies.orValue([]).exists(q, q.name == p)) \u0026\u0026 object.spec.?policies.orValue([]).all(q, q.name.startsWith(object.metadata.name + '-') \u0026\u0026 !has(q.rules) \u0026\u0026 q.?identityPaths.orValue([]).all(ip, ip.path.endsWith('/namespaces/{serviceAccountNamespace}/apps/docker-registry/{serviceAccountName}') \u0026\u0026 ip.capabilities.all(c, c == 'read'))))"
+      message: "a registry Vault claim is a guest on the platform mount with one role for its own service account, reading only its own leaf"
+      reason: Forbidden
+    - expression: "request.resource.resource != 's3bucketclaims' || request.operation == 'DELETE' || !variables.isOp || (object.spec.vaultConfigRef.name == params.data.s3Config \u0026\u0026 object.spec.customerLogin == request.namespace \u0026\u0026 object.spec.vault.secretsPrefix == params.data.secretsPrefix \u0026\u0026 object.spec.vault.destinationPath == 'namespaces/' + request.namespace + '/apps/docker-registry/' + object.metadata.name \u0026\u0026 !object.spec.?bucket.?public.orValue(false) \u0026\u0026 !has(object.spec.bucket.name))"
+      message: "a registry bucket is private, new and writes its keys only to its own leaf"
+      reason: Forbidden
+---
+# Source: registry-platform/templates/admission.yaml
+# ПОКА БЕЗ (выключено по умолчанию): политика V15.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: "v15-registry-applications"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+    registry.in-cloud.io/policy: "v15"
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: v1
+    kind: ConfigMap
+  matchConstraints:
+    namespaceSelector:
+      matchLabels: {"kubernetes.io/metadata.name":"argocd"}
+    resourceRules:
+      - apiGroups: ["argoproj.io"]
+        apiVersions: ["*"]
+        resources: ["applications"]
+        operations: ["CREATE","UPDATE","DELETE"]
+  matchConditions:
+    - name: subject
+      expression: "(request.operation == 'DELETE' ? oldObject : object).metadata.name.startsWith('reg-')"
+  variables:
+    - name: "isOp"
+      expression: "request.userInfo.username == params.data.registryOperator"
+    - name: "isPlatform"
+      expression: "request.userInfo.username in params.data.platformUsers.split(',') || request.userInfo.groups.exists(g, g in params.data.platformGroups.split(','))"
+  validations:
+    - expression: "request.operation == 'UPDATE' || variables.isPlatform || request.userInfo.username in [params.data.addonsOperator, params.data.garbageCollector]"
+      message: "registry Applications are created and deleted only by addons-operator"
+      reason: Forbidden
+    - expression: "request.operation != 'UPDATE' || variables.isPlatform || request.userInfo.username == params.data.addonsOperator || ((has(object.spec) == has(oldObject.spec) \u0026\u0026 (!has(object.spec) || object.spec == oldObject.spec)) \u0026\u0026 (has(object.metadata.ownerReferences) == has(oldObject.metadata.ownerReferences) \u0026\u0026 (!has(object.metadata.ownerReferences) || object.metadata.ownerReferences == oldObject.metadata.ownerReferences)) \u0026\u0026 (!variables.isOp || ((has(object.metadata.labels) == has(oldObject.metadata.labels) \u0026\u0026 (!has(object.metadata.labels) || object.metadata.labels == oldObject.metadata.labels)) \u0026\u0026 (has(object.metadata.annotations) == has(oldObject.metadata.annotations) \u0026\u0026 (!has(object.metadata.annotations) || object.metadata.annotations == oldObject.metadata.annotations)))))"
+      message: "registry Applications are changed only by addons-operator; others may not change their spec or owners"
+      reason: Forbidden
+---
+# Source: registry-platform/templates/admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: "v1-registry-iam"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+    registry.in-cloud.io/policy: "v1"
+spec:
+  policyName: "v1-registry-iam"
+  validationActions: ["Deny"]
+  paramRef:
+    name: "registry-platform-admission"
+    namespace: "registry-system"
+    parameterNotFoundAction: Deny
+---
+# Source: registry-platform/templates/admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: "v2-registry-status"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+    registry.in-cloud.io/policy: "v2"
+spec:
+  policyName: "v2-registry-status"
+  validationActions: ["Deny"]
+  paramRef:
+    name: "registry-platform-admission"
+    namespace: "registry-system"
+    parameterNotFoundAction: Deny
+---
+# Source: registry-platform/templates/admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: "v3-registry-route"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+    registry.in-cloud.io/policy: "v3"
+spec:
+  policyName: "v3-registry-route"
+  validationActions: ["Deny"]
+  paramRef:
+    name: "registry-platform-admission"
+    namespace: "registry-system"
+    parameterNotFoundAction: Deny
+---
+# Source: registry-platform/templates/admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: "v4-registry-zot-pods"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+    registry.in-cloud.io/policy: "v4"
+spec:
+  policyName: "v4-registry-zot-pods"
+  validationActions: ["Deny"]
+  paramRef:
+    name: "registry-platform-admission"
+    namespace: "registry-system"
+    parameterNotFoundAction: Deny
+---
+# Source: registry-platform/templates/admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: "v5-registry-tenant-namespaces"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+    registry.in-cloud.io/policy: "v5"
+spec:
+  policyName: "v5-registry-tenant-namespaces"
+  validationActions: ["Deny"]
+  paramRef:
+    name: "registry-platform-admission"
+    namespace: "registry-system"
+    parameterNotFoundAction: Deny
+---
+# Source: registry-platform/templates/admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: "v6-registry-reservations"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+    registry.in-cloud.io/policy: "v6"
+spec:
+  policyName: "v6-registry-reservations"
+  validationActions: ["Deny"]
+  paramRef:
+    name: "registry-platform-admission"
+    namespace: "registry-system"
+    parameterNotFoundAction: Deny
+---
+# Source: registry-platform/templates/admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: "v7-registry-annotations"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+    registry.in-cloud.io/policy: "v7"
+spec:
+  policyName: "v7-registry-annotations"
+  validationActions: ["Deny"]
+  paramRef:
+    name: "registry-platform-admission"
+    namespace: "registry-system"
+    parameterNotFoundAction: Deny
+---
+# Source: registry-platform/templates/admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: "v8-registry-zot-workload"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+    registry.in-cloud.io/policy: "v8"
+spec:
+  policyName: "v8-registry-zot-workload"
+  validationActions: ["Deny"]
+  paramRef:
+    name: "registry-platform-admission"
+    namespace: "registry-system"
+    parameterNotFoundAction: Deny
+---
+# Source: registry-platform/templates/admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: "v9-registry-tracking"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+    registry.in-cloud.io/policy: "v9"
+spec:
+  policyName: "v9-registry-tracking"
+  validationActions: ["Deny"]
+  paramRef:
+    name: "registry-platform-admission"
+    namespace: "registry-system"
+    parameterNotFoundAction: Deny
+---
+# Source: registry-platform/templates/admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: "v10-registry-addons"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+    registry.in-cloud.io/policy: "v10"
+spec:
+  policyName: "v10-registry-addons"
+  validationActions: ["Deny"]
+  paramRef:
+    name: "registry-platform-admission"
+    namespace: "registry-system"
+    parameterNotFoundAction: Deny
+---
+# Source: registry-platform/templates/admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: "v11-registry-addonvalues"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+    registry.in-cloud.io/policy: "v11"
+spec:
+  policyName: "v11-registry-addonvalues"
+  validationActions: ["Deny"]
+  paramRef:
+    name: "registry-platform-admission"
+    namespace: "registry-system"
+    parameterNotFoundAction: Deny
+---
+# Source: registry-platform/templates/admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: "v12-registry-addonphases"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+    registry.in-cloud.io/policy: "v12"
+spec:
+  policyName: "v12-registry-addonphases"
+  validationActions: ["Deny"]
+  paramRef:
+    name: "registry-platform-admission"
+    namespace: "registry-system"
+    parameterNotFoundAction: Deny
+---
+# Source: registry-platform/templates/admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: "v13-registry-appprojects"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+    registry.in-cloud.io/policy: "v13"
+spec:
+  policyName: "v13-registry-appprojects"
+  validationActions: ["Deny"]
+  paramRef:
+    name: "registry-platform-admission"
+    namespace: "registry-system"
+    parameterNotFoundAction: Deny
+---
+# Source: registry-platform/templates/admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: "v14-registry-vault-claims"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+    registry.in-cloud.io/policy: "v14"
+spec:
+  policyName: "v14-registry-vault-claims"
+  validationActions: ["Deny"]
+  paramRef:
+    name: "registry-platform-admission"
+    namespace: "registry-system"
+    parameterNotFoundAction: Deny
+---
+# Source: registry-platform/templates/admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: "v15-registry-applications"
+  labels:
+    app.kubernetes.io/name: registry-platform
+    app.kubernetes.io/instance: "registry-platform"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/managed-by: "Helm"
+    helm.sh/chart: "registry-platform-1.0.0"
+    registry.in-cloud.io/policy: "v15"
+spec:
+  policyName: "v15-registry-applications"
+  validationActions: ["Deny"]
+  paramRef:
+    name: "registry-platform-admission"
+    namespace: "registry-system"
+    parameterNotFoundAction: Deny

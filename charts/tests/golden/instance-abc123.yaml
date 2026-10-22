@@ -1,0 +1,318 @@
+---
+# Source: registry-instance/templates/serviceaccount.yaml
+# SA пода zot; на него выписана роль Vault заказа (zot-<id>), им же iam-proxy входит в
+# эндпоинт регистрации registry-operator. Токен API в под не монтируется: vault-agent и
+# iam-proxy получают projected-токены каждый со своей аудиторией отдельными томами.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: "zot-abc123"
+  labels:
+    app.kubernetes.io/name: zot
+    app.kubernetes.io/instance: "zot-abc123"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/component: "workload"
+    app.kubernetes.io/managed-by: registry-operator
+    registry.in-cloud.io/id: "abc123"
+    registry.in-cloud.io/namespace: "cust01"
+    registry.in-cloud.io/owner-uid: "3f1c2a9e-7b4d-4e8a-9c21-5d6f7a8b9c0d"
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+automountServiceAccountToken: false
+---
+# Source: registry-instance/templates/service.yaml
+# Вход в регистри — только iam-proxy (порт proxy); zot снаружи пода не слышен, порт проб
+# в Service не выходит. На этот Service ссылается маршрут края, который ставит
+# registry-operator.
+apiVersion: v1
+kind: Service
+metadata:
+  name: "zot-abc123"
+  labels:
+    app.kubernetes.io/name: zot
+    app.kubernetes.io/instance: "zot-abc123"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/component: "workload"
+    app.kubernetes.io/managed-by: registry-operator
+    registry.in-cloud.io/id: "abc123"
+    registry.in-cloud.io/namespace: "cust01"
+    registry.in-cloud.io/owner-uid: "3f1c2a9e-7b4d-4e8a-9c21-5d6f7a8b9c0d"
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: zot
+    registry.in-cloud.io/id: "abc123"
+  ports:
+    - name: http
+      port: 8080
+      targetPort: proxy
+      protocol: TCP
+---
+# Source: registry-instance/templates/deployment.yaml
+# zot слушает только 127.0.0.1:5000 и хранит данные только в S3; снаружи пода
+# доступен лишь iam-proxy: он проверяет JWT клиента и спрашивает право публичным
+# AuthorizeService.Check токеном самого клиента «о себе» — своих прав в IAM у прокси нет.
+# config.json zot рендерит init vault-agent до старта zot (повторяет, пока лист с
+# ключами бакета не появится); ключи видит только контейнер zot. Сетевая политика
+# пода — волной раньше.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: "zot-abc123"
+  labels:
+    app.kubernetes.io/name: zot
+    app.kubernetes.io/instance: "zot-abc123"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/component: "workload"
+    app.kubernetes.io/managed-by: registry-operator
+    registry.in-cloud.io/id: "abc123"
+    registry.in-cloud.io/namespace: "cust01"
+    registry.in-cloud.io/owner-uid: "3f1c2a9e-7b4d-4e8a-9c21-5d6f7a8b9c0d"
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: zot
+      registry.in-cloud.io/id: "abc123"
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: zot
+        app.kubernetes.io/instance: "zot-abc123"
+        app.kubernetes.io/part-of: registry
+        app.kubernetes.io/component: "workload"
+        app.kubernetes.io/managed-by: registry-operator
+        registry.in-cloud.io/id: "abc123"
+        registry.in-cloud.io/namespace: "cust01"
+        registry.in-cloud.io/owner-uid: "3f1c2a9e-7b4d-4e8a-9c21-5d6f7a8b9c0d"
+      annotations:
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/agent-init-first: "true"
+        vault.hashicorp.com/agent-pre-populate: "true"
+        vault.hashicorp.com/agent-pre-populate-only: "true"
+        vault.hashicorp.com/agent-inject-containers: zot
+        vault.hashicorp.com/service: "https://vault.vault.svc:8200"
+        vault.hashicorp.com/ca-cert: "/etc/registry/ca/ca.crt"
+        vault.hashicorp.com/auth-path: "auth/kubernetes-tenants"
+        vault.hashicorp.com/role: "zot-abc123"
+        vault.hashicorp.com/agent-service-account-token-volume-name: vault-token
+        vault.hashicorp.com/agent-copy-volume-mounts: zot
+        # uid и gid пода: config.json (0440) читает zot. agent-run-as-same-user здесь не годится —
+        # он требует runAsUser у первого контейнера, а uid задан на уровне пода.
+        vault.hashicorp.com/agent-run-as-user: "65532"
+        vault.hashicorp.com/agent-run-as-group: "65532"
+        vault.hashicorp.com/template-config-exit-on-retry-failure: "true"
+        vault.hashicorp.com/agent-requests-cpu: "10m"
+        vault.hashicorp.com/agent-requests-mem: "32Mi"
+        vault.hashicorp.com/agent-limits-cpu: "100m"
+        vault.hashicorp.com/agent-limits-mem: "64Mi"
+        vault.hashicorp.com/agent-inject-secret-config.json: "secret/data/clusters/example/namespaces/cust01/apps/docker-registry/zot-abc123"
+        vault.hashicorp.com/agent-inject-template-config.json: "{{- with secret \"secret/data/clusters/example/namespaces/cust01/apps/docker-registry/zot-abc123\" -}}{\"distSpecVersion\":\"1.1.1\",\"http\":{\"address\":\"127.0.0.1\",\"port\":\"5000\"},\"log\":{\"level\":\"info\"},\"storage\":{\"dedupe\":false,\"gc\":true,\"remoteCache\":false,\"rootDirectory\":\"/var/lib/zot\",\"storageDriver\":{\"accesskey\":{{ .Data.data.accessKey | toJSON }},\"bucket\":\"cust01-zot-abc123\",\"forcepathstyle\":true,\"name\":\"s3\",\"region\":\"ru-1\",\"regionendpoint\":\"https://s3.example.test\",\"rootdirectory\":\"/zot\",\"secretkey\":{{ .Data.data.secretKey | toJSON }},\"secure\":true}}}{{- end -}}"
+        vault.hashicorp.com/agent-inject-perms-config.json: "0440"
+    spec:
+      serviceAccountName: "zot-abc123"
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: zot
+          image: "ghcr.io/project-zot/zot-linux-amd64:v2.1.20@sha256:95a837a0afacf5b7edc0c92493f04beee6891989b8d2fd50a00cf65a1e6d4fd5"
+          imagePullPolicy: IfNotPresent
+          args:
+            - serve
+            - /vault/secrets/config.json
+          volumeMounts:
+            - name: scratch
+              mountPath: /var/lib/zot
+            - name: tmp
+              mountPath: /tmp
+            # CA площадки — для vault-agent (agent-copy-volume-mounts: zot); zot его не читает.
+            - name: ca
+              mountPath: /etc/registry/ca
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources: {"limits":{"memory":"1Gi"},"requests":{"cpu":"100m","memory":"256Mi"}}
+        - name: iam-proxy
+          image: "docker.io/prorobotech/registry-iam-proxy:v0.1.0@sha256:2e7b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809"
+          imagePullPolicy: IfNotPresent
+          args:
+            - --listen=:8080
+            - --health-listen=:8081
+            - --upstream=http://127.0.0.1:5000
+            - "--registry-id=abc123"
+            - "--anonymous-pull=false"
+            - "--kaname-api-url=https://kaname.example.test"
+            - "--jwks-url=https://kaname.example.test:9097/.well-known/jwks.json"
+            - "--issuer=https://kaname.example.test"
+            - "--audience=registry"
+            - "--ca-file=/etc/registry/ca/ca.crt"
+            - "--decision-cache-ttl=10s"
+            - "--registration-url=https://registry-operator.registry-system.svc:9443/v1/repositories"
+            - "--registration-token-file=/var/run/secrets/registry-operator/token"
+          ports:
+            - name: proxy
+              containerPort: 8080
+              protocol: TCP
+            - name: health
+              containerPort: 8081
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            periodSeconds: 20
+            failureThreshold: 3
+          volumeMounts:
+            - name: ca
+              mountPath: /etc/registry/ca
+              readOnly: true
+            - name: registry-operator-token
+              mountPath: "/var/run/secrets/registry-operator"
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources: {"limits":{"memory":"128Mi"},"requests":{"cpu":"20m","memory":"32Mi"}}
+      volumes:
+        - name: scratch
+          emptyDir:
+            sizeLimit: "2Gi"
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: ca
+          configMap:
+            name: "platform-ca"
+            items:
+              - key: "ca.crt"
+                path: "ca.crt"
+        # Токен входа vault-agent: аудитория Vault; монтирует его только инжектор в
+        # контейнер vault-agent.
+        - name: vault-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: "vault"
+                  expirationSeconds: 3600
+                  path: token
+        # Токен заявки на регистрацию репозитория: аудитория registry-operator, только в
+        # контейнере iam-proxy. Оператор сверяет через TokenReview, что это SA zot-<id>.
+        - name: registry-operator-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: "registry-operator"
+                  expirationSeconds: 3600
+                  path: token
+---
+# Source: registry-instance/templates/networkpolicy.yaml
+# Сеть пода zot. На площадке действует запрет по умолчанию, поэтому разрешено ровно:
+# вход — прокси Envoy Gateway своего Gateway на :8080 (и kubelet на порт проб :8081,
+# если площадка его включила); выход — DNS (только нужные имена), S3 заказа, Vault,
+# публичный API kaname (Check и JWKS) и эндпоинт регистрации registry-operator.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: "zot-abc123"
+  labels:
+    app.kubernetes.io/name: zot
+    app.kubernetes.io/instance: "zot-abc123"
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/component: "workload"
+    app.kubernetes.io/managed-by: registry-operator
+    registry.in-cloud.io/id: "abc123"
+    registry.in-cloud.io/namespace: "cust01"
+    registry.in-cloud.io/owner-uid: "3f1c2a9e-7b4d-4e8a-9c21-5d6f7a8b9c0d"
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: zot
+      registry.in-cloud.io/id: "abc123"
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: "envoy-gateway-system"
+            k8s:gateway.envoyproxy.io/owning-gateway-namespace: "registry-edge"
+            k8s:gateway.envoyproxy.io/owning-gateway-name: "registry-gw"
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: "kube-system"
+            "k8s:k8s-app": "kube-dns"
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              - matchName: "kaname.example.test"
+              - matchPattern: "kaname.example.test.*"
+              - matchName: "registry-operator.registry-system.svc"
+              - matchPattern: "registry-operator.registry-system.svc.*"
+              - matchName: "s3.example.test"
+              - matchPattern: "s3.example.test.*"
+              - matchName: "vault.vault.svc"
+              - matchPattern: "vault.vault.svc.*"
+    - toFQDNs:
+        - matchName: "s3.example.test"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: "vault"
+            "k8s:app.kubernetes.io/name": "vault"
+      toPorts:
+        - ports:
+            - port: "8200"
+              protocol: TCP
+    - toFQDNs:
+        - matchName: "kaname.example.test"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "9097"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: "registry-system"
+            "k8s:app.kubernetes.io/name": "registry-operator"
+      toPorts:
+        - ports:
+            - port: "9443"
+              protocol: TCP

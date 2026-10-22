@@ -202,6 +202,11 @@ def cmd_probe_instance(render, site_file, vars_file, probes_on):
                 and ann.get("vault.hashicorp.com/agent-pre-populate") == "true"
                 and ann.get("vault.hashicorp.com/agent-pre-populate-only") == "true",
                 "init vault-agent renders config before zot starts, no agent sidecar")
+        sc = pod["securityContext"]
+        p.check(ann.get("vault.hashicorp.com/agent-run-as-user") == str(sc["runAsUser"])
+                and ann.get("vault.hashicorp.com/agent-run-as-group") == str(sc["runAsGroup"])
+                and "vault.hashicorp.com/agent-run-as-same-user" not in ann,
+                "vault-agent runs as the pod uid and gid: zot reads the rendered config")
         p.check(ann.get("vault.hashicorp.com/template-config-exit-on-retry-failure") == "true",
                 "init vault-agent fails and is restarted until the leaf exists")
         p.check(ann.get("vault.hashicorp.com/agent-inject-secret-config.json") == v["vaultSecretPath"],
