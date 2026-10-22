@@ -8,7 +8,7 @@
 
 | этап | что пишет registry-operator | откуда здесь |
 |---|---|---|
-| 1 | `S3BucketClaim`, `VaultClaim`, iam `ServiceAccount` робота, кортеж `registry_registry:<id>` в kaname | типы и личность модуля — манифест модуля kaname |
+| 1 | `S3BucketClaim`, `VaultClaim`, iam `ServiceAccount` робота, кортеж `registry_registry:<id>` в kaname | личность модуля — манифест модуля kaname; типы — канон модели kaname |
 | 2 | iam `AccessBinding` робота, `Addon` zot | роли — манифест модуля; форма `Addon` — `AddonTemplate`, значения — слои `AddonValue` |
 | 3 | `HTTPRoute /v2/<id>/` | Gateway и общие маршруты `/v2/`, `/iam/token` |
 
@@ -22,7 +22,7 @@
 | `AddonPhase <addonPhase.addonName>` и `AddonValue <addonPhase.addonName>-edge` | включено | порядок объектов края, когда площадка ставит этот чарт через `Addon` |
 | `HTTPRoute registry-api-root` (`/v2/`) и `registry-token` (`/iam/token`), `ReferenceGrant` к их бэкендам | включено | общие маршруты края; маршрут заказа `/v2/<id>/` ставит оператор |
 | `Gateway` | включено | Gateway края: только `HTTPRoute` и только из namespace с метками края |
-| `ConfigMap <kanameModule.configMapName>` (ключ `registry.manifest.yaml`) | включено | манифест модуля registry для kaname: типы, роли, личность модуля |
+| `ConfigMap <kanameModule.configMapName>` (ключ `registry.manifest.yaml`, метка `kaname.in-cloud.io/module-manifest`) | включено | манифест модуля registry для kaname: роли и личность модуля |
 | `ValidatingAdmissionPolicy` V1–V15 с привязками и параметрами | **выключено** («пока без») | ограды писателей помимо оператора |
 | `AppProject <projectPrefix><login>` | **выключено** («пока без») | проект Argo CD на арендатора |
 
@@ -72,15 +72,17 @@ Gateway API, которых ещё нет. При установке `helm insta
 
 ## Манифест модуля kaname
 
-`files/registry.manifest.yaml` — манифест модуля `registry` (`apiVersion: iam/v1`), рендер —
-`ConfigMap` с одним ключом `registry.manifest.yaml` в `kanameModule.namespace`. Это тот вид,
-который kaname читает на старте: каждый ключ ConfigMap — файл каталога доставки манифестов
-(`manifests.mountPath`, по умолчанию `/etc/kaname/manifests`), имя ключа — `<модуль>.manifest.yaml`.
+`files/registry.manifest.yaml` — манифест модуля `registry` (`apiVersion: iam/v1`); его
+единственный владелец — registry-operator, документ ведётся только здесь. Рендер — `ConfigMap`
+с одним ключом `registry.manifest.yaml` в `kanameModule.namespace` и меткой
+`kaname.in-cloud.io/module-manifest: "true"`: по ней чарт kaname собирает каталог доставки
+манифестов из нескольких ConfigMap, каждый ключ — файл `<модуль>.manifest.yaml`.
 
-- **Типы.** `registry_registry` (родитель — `project`, аккаунт kaname выводит сам) и
-  `registry_repository` (родитель — `registry_registry`). Раздел взят дословно у манифеста
-  модуля в PRO-Robotech/kacho (`services/registry/manifest.yaml` @741d340e3): блоки сверяются
-  с каноном модели доступов побайтово.
+- **Типов модуль не объявляет.** `registry_registry` (родитель — `project`) и
+  `registry_repository` (родитель — `registry_registry`) несёт канон модели прав образа kaname.
+  Доставка, объявившая тип канона, обязана совпасть с его блоком побайтово, иначе kaname
+  отказывает в пуске; поэтому раздела `resources` здесь нет: он был бы либо копией чужого
+  текста, либо отказом kaname. Роли опираются на глаголы этих типов.
 - **Роли** — правило верхнего уровня на регистри и вложенное (`children`) на каждый его
   репозиторий, включая созданные позже:
 
@@ -93,14 +95,16 @@ Gateway API, которых ещё нет. При установке `helm insta
   Роботу CI registry-operator выдаёт `registry.pusher` точечно на `registry.registries:<id>`.
   Права «на аккаунт» для людей и групп — выдача с областью `iam.account` и целью `allInScope`:
   её выдаёт платформа или владелец аккаунта, не оператор.
+- **Публичного чтения модуль не объявляет.** Анонимный pull включает только флаг `--public`
+  iam-proxy (переменная заказа `public`); кортежей с подстановочным субъектом registry-operator
+  не пишет.
 - **Личность модуля** `kacho-registry` в аккаунте `kanameModule.systemAccount` и её вступление
   в `module-relation-writers`. Под ней registry-operator — единственный писатель типов
   `registry_*` — регистрирует ресурсы (`RegisterResource` на внутреннем листенере kaname по mTLS).
 
-Каталог доставки у kaname один, и ConfigMap он монтирует один (`manifests.configMapName`
-его чарта). Площадка кладёт ключ `registry.manifest.yaml` этого объекта в доставку kaname:
-либо доставка собирается из нескольких ConfigMap (projected-том), либо производитель доставки
-берёт этот ключ отсюда. Второго манифеста модуля `registry` в доставке быть не должно.
+Модуль `registry` в доставке kaname объявляет ровно один манифест: kaname отказывает в пуске,
+если имя модуля объявлено двумя манифестами одного обхода. Там, где стоит registry-operator,
+другого манифеста модуля `registry` в доставке нет.
 
 ## Политики допуска (выключены)
 
@@ -117,12 +121,12 @@ ConfigMap `<release>-admission` в `admission.paramsNamespace`, без пара�
 | V5 | метки арендатора на namespace | только платформа |
 | V6 | `RegistryIDReservation` | создаёт registry-operator, снимает только платформа |
 | V7 | аннотации `registry.in-cloud.io/*` на `Registry` | только платформа и оператор |
-| V8 | SA, Service, Deployment, CNP `zot-*` в namespace арендатора | создаёт и снимает Argo CD; прочие — только метаданные вне меток |
+| V8 | SA, Service, Deployment, CNP, ReferenceGrant `zot-*` в namespace арендатора | создаёт и снимает Argo CD; прочие — только метаданные вне меток |
 | V9 | отметка отслеживания Argo CD `reg-*` | ставит только Argo CD |
 | V10 | `Addon reg-*` | только registry-operator, и только закреплённой формы: свой namespace, проект платформы, закреплённая версия, ровно переменные заказа, только слои order и site |
 | V11 | `AddonValue` слоёв чарта экземпляра | только платформа, без подстановок плагина секретов |
 | V12 | `AddonPhase` | у `Addon` заказов фаз нет; фаза площадки — только платформа |
-| V13 | `AppProject <projectPrefix>*` | только платформа; один destination — namespace арендатора, уровня кластера ничего, только рабочая нагрузка zot |
+| V13 | `AppProject <projectPrefix>*` | только платформа; один destination — namespace арендатора, уровня кластера ничего, только рабочая нагрузка zot и разрешение её маршрута (`ReferenceGrant`) |
 | V14 | `VaultClaim`, `S3BucketClaim` `zot-*` | только registry-operator; гость на mount платформы, одна роль на свой SA только со своими политиками, чтение только своего листа; бакет приватный, новый, ключи — в свой лист |
 | V15 | `Application reg-*` | создаёт и снимает addons-operator; прочие не меняют spec и владельцев |
 
@@ -133,5 +137,5 @@ ConfigMap `<release>-admission` в `admission.paramsNamespace`, без пара�
 
 `charts/tests/run.sh`: lint, golden рендера по умолчанию и со всем включённым
 (`charts/tests/golden/platform-*.yaml`), отрицательные пробы значений, проверки формы (в том
-числе манифест модуля: типы, роли с `children`, личность модуля), схемы по закреплённым CRD,
+числе манифест модуля: без раздела типов, роли с `children`, личность модуля), схемы по закреплённым CRD,
 отсутствие Lua; `charts/tests/admission/run.sh` — политики на кластере.

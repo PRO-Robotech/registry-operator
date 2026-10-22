@@ -47,10 +47,11 @@ addon:
 # рендерит экземпляр с этим слоем).
 site: {}
 
-# Манифест модуля registry для kaname (files/registry.manifest.yaml): типы ресурсов
-# регистри, роли registry.puller/pusher/admin с правилами на репозитории и личность
-# модуля kacho-registry. ConfigMap с одним ключом registry.manifest.yaml — тот вид,
-# который kaname читает из каталога доставки манифестов (README.md).
+# Манифест модуля registry для kaname (files/registry.manifest.yaml): роли
+# registry.puller/pusher/admin с правилами на репозитории и личность модуля
+# kacho-registry; типы регистри — канон модели образа kaname. ConfigMap с одним ключом
+# registry.manifest.yaml и меткой kaname.in-cloud.io/module-manifest — по ней чарт kaname
+# собирает каталог доставки манифестов (README.md).
 kanameModule:
   enabled: true
   # namespace kaname, где лежит доставка манифестов.
@@ -136,7 +137,9 @@ admission:
     s3Config: ""
     authMount: ""
     secretsPrefix: ""
-  # Маршрут заказа: namespace края и переменные Addon.
+  # Маршрут заказа: namespace края и переменные Addon. routeNamespace равен
+  # site.edge.routeNamespace: только маршрутам этого namespace ReferenceGrant экземпляра
+  # открывает Service zot-<id>; расхождение — отказ рендера.
   routeNamespace: ""
   routeHost: ""
 

@@ -109,7 +109,7 @@ registry.in-cloud.io/id: {{ .Values.instance.id | toJson }}
 
 {{/*
 Имена DNS, которые под вправе разрешать: хост S3, FQDN-пиры и хосты адресов Vault,
-публичного API kaname, его набора ключей и эндпоинта регистрации. Выход по L3 держат
+публичного gRPC kaname (Check), его набора ключей и эндпоинта регистрации. Выход по L3 держат
 отдельные правила; DNS лишь не отвечает на прочие имена.
 */}}
 {{- define "ri.dnsNames" -}}
@@ -118,7 +118,8 @@ registry.in-cloud.io/id: {{ .Values.instance.id | toJson }}
 {{- range (concat $n.vault $n.kaname $n.registryOperator) -}}
 {{- if .fqdn -}}{{- $names = append $names .fqdn -}}{{- end -}}
 {{- end -}}
-{{- range (list .Values.site.vault.address .Values.site.kaname.apiURL .Values.site.kaname.jwksURL .Values.site.registryOperator.registrationURL) -}}
+{{- $names = append $names (first (splitList ":" .Values.site.kaname.address)) -}}
+{{- range (list .Values.site.vault.address .Values.site.kaname.jwksURL .Values.site.registryOperator.registrationURL) -}}
 {{- $names = append $names (include "ri.url" . | fromJson).host -}}
 {{- end -}}
 {{- $names | uniq | sortAlpha | toJson -}}

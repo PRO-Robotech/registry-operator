@@ -1,5 +1,12 @@
 {{- if .Values.admission.enabled }}
 {{- $ad := .Values.admission }}
+{{- /* Маршрут заказа V3 пускает только в admission.routeNamespace, а ReferenceGrant экземпляра
+открывает Service zot-<id> только маршрутам site.edge.routeNamespace: разойдись они — маршрут
+либо не пройдёт допуск, либо не разрешится. */}}
+{{- $siteRoutes := dig "edge" "routeNamespace" "" (.Values.site | default dict) }}
+{{- if ne $siteRoutes $ad.routeNamespace }}
+{{- fail (printf "site.edge.routeNamespace %q must equal admission.routeNamespace %q: the instance grant admits routes of one namespace only" $siteRoutes $ad.routeNamespace) }}
+{{- end }}
 {{- $au := $ad.authors }}
 {{- $b := .Values.addon.backend }}
 {{- $g := .Values.sharedRoutes.gateway }}
@@ -111,10 +118,10 @@ data:
   "checks" (list
     (dict "expression" "variables.isPlatform || variables.isOp || (variables.na.all(k, !k.startsWith('registry.in-cloud.io/') || (k in variables.oa && variables.oa[k] == variables.na[k])) && variables.oa.all(k, !k.startsWith('registry.in-cloud.io/') || k in variables.na))" "message" "registry.in-cloud.io/ annotations of a Registry are set only by the platform"))) }}
 
-{{- /* V8: рабочую нагрузку zot-* в namespace арендатора пишет только Argo CD. */}}
+{{- /* V8: рабочую нагрузку zot-* (и разрешение маршруту к её Service) в namespace арендатора пишет только Argo CD. */}}
 {{- $saSame := printf "%s && %s && %s" (include "rp.same" "automountServiceAccountToken") (include "rp.same" "secrets") (include "rp.same" "imagePullSecrets") }}
 {{- $policies = append $policies (dict "id" "v8" "name" "registry-zot-workload" "nsSelector" $tenant
-  "rules" (list (dict "apiGroups" (list "") "resources" (list "serviceaccounts" "services") "operations" (list "CREATE" "UPDATE" "DELETE")) (dict "apiGroups" (list "apps") "resources" (list "deployments") "operations" (list "CREATE" "UPDATE" "DELETE")) (dict "apiGroups" (list "cilium.io") "resources" (list "ciliumnetworkpolicies") "operations" (list "CREATE" "UPDATE" "DELETE")))
+  "rules" (list (dict "apiGroups" (list "") "resources" (list "serviceaccounts" "services") "operations" (list "CREATE" "UPDATE" "DELETE")) (dict "apiGroups" (list "apps") "resources" (list "deployments") "operations" (list "CREATE" "UPDATE" "DELETE")) (dict "apiGroups" (list "cilium.io") "resources" (list "ciliumnetworkpolicies") "operations" (list "CREATE" "UPDATE" "DELETE")) (dict "apiGroups" (list "gateway.networking.k8s.io") "resources" (list "referencegrants") "operations" (list "CREATE" "UPDATE" "DELETE")))
   "match" "(request.operation == 'DELETE' ? oldObject : object).metadata.name.startsWith('zot-')"
   "vars" (list (dict "name" "isArgo" "expression" "request.userInfo.username == params.data.argoController"))
   "checks" (list
@@ -169,7 +176,7 @@ data:
   "match" (printf "(request.operation == 'DELETE' ? oldObject : object).metadata.name.startsWith(%s)" (squote $b.projectPrefix))
   "checks" (list
     (dict "expression" (printf "variables.isPlatform || (request.operation == 'UPDATE' && %s)" (include "rp.same" "spec")) "message" "registry Argo CD projects are written only by the platform")
-    (dict "expression" "request.operation == 'DELETE' || (!has(object.spec.sourceNamespaces) && size(object.spec.?clusterResourceWhitelist.orValue([])) == 0 && object.spec.?sourceRepos.orValue([]) == [params.data.repoURL] && size(object.spec.?destinations.orValue([])) == 1 && object.spec.destinations[0].?server.orValue('') == 'https://kubernetes.default.svc' && object.spec.destinations[0].?namespace.orValue('') == object.metadata.name.substring(size(params.data.projectPrefix)) && object.spec.?namespaceResourceWhitelist.orValue([]).all(r, (r.group == '' && r.kind in ['ServiceAccount', 'Service']) || (r.group == 'apps' && r.kind == 'Deployment') || (r.group == 'cilium.io' && r.kind == 'CiliumNetworkPolicy')))" "message" "a registry project deploys only the zot workload from the registry-instance chart into its own tenant namespace"))) }}
+    (dict "expression" "request.operation == 'DELETE' || (!has(object.spec.sourceNamespaces) && size(object.spec.?clusterResourceWhitelist.orValue([])) == 0 && object.spec.?sourceRepos.orValue([]) == [params.data.repoURL] && size(object.spec.?destinations.orValue([])) == 1 && object.spec.destinations[0].?server.orValue('') == 'https://kubernetes.default.svc' && object.spec.destinations[0].?namespace.orValue('') == object.metadata.name.substring(size(params.data.projectPrefix)) && object.spec.?namespaceResourceWhitelist.orValue([]).all(r, (r.group == '' && r.kind in ['ServiceAccount', 'Service']) || (r.group == 'apps' && r.kind == 'Deployment') || (r.group == 'cilium.io' && r.kind == 'CiliumNetworkPolicy') || (r.group == 'gateway.networking.k8s.io' && r.kind == 'ReferenceGrant')))" "message" "a registry project deploys only the zot workload from the registry-instance chart into its own tenant namespace"))) }}
 
 {{- /* V14: бакет и роль Vault заказа — только registry-operator и только фиксированной формы. */}}
 {{- $policies = append $policies (dict "id" "v14" "name" "registry-vault-claims" "nsSelector" $tenant

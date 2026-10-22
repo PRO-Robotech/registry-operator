@@ -33,5 +33,7 @@ spec:
       kind: Deployment
     - group: cilium.io
       kind: CiliumNetworkPolicy
+    - group: gateway.networking.k8s.io
+      kind: ReferenceGrant
 {{- end }}
 {{- end }}

@@ -5,10 +5,11 @@
 {{- fail "files/registry.manifest.yaml must name the system account through exactly three markers" }}
 {{- end }}
 ---
-# Манифест модуля registry для kaname: типы registry_registry и registry_repository,
-# роли registry.puller, registry.pusher, registry.admin с правилами на репозитории
-# (children) и личность модуля kacho-registry, под которой registry-operator
-# регистрирует ресурсы. Ключ — имя файла в каталоге доставки манифестов kaname.
+# Манифест модуля registry для kaname: роли registry.puller, registry.pusher,
+# registry.admin с правилами на репозитории (children) и личность модуля
+# kacho-registry, под которой registry-operator регистрирует ресурсы. Типы регистри —
+# канон модели образа kaname (files/registry.manifest.yaml, шапка). Ключ — имя файла в
+# каталоге доставки манифестов kaname.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -16,6 +17,9 @@ metadata:
   namespace: {{ $k.namespace | toJson }}
   labels:
     {{- include "rp.labels" . | nindent 4 }}
+    # По этой метке чарт kaname собирает каталог доставки манифестов из нескольких
+    # ConfigMap; каждый ключ — файл <модуль>.manifest.yaml.
+    kaname.in-cloud.io/module-manifest: "true"
 data:
   registry.manifest.yaml: {{ replace "zzph-system-account" $k.systemAccount $text | toJson }}
 {{- end }}

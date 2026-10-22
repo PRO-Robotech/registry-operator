@@ -18,6 +18,13 @@ zot одного регистри по заказу и его прокси пр�
 | `cilium.io/v2` CiliumNetworkPolicy | `zot-<id>` | 0 | сеть пода (ниже); применяется раньше Deployment |
 | `v1` Service | `zot-<id>` | 0 | `:8080` → порт `proxy` iam-proxy; на него ссылается маршрут заказа |
 | `apps/v1` Deployment | `zot-<id>` | 1 | `replicas: 1`, `Recreate`; zot + iam-proxy, init vault-agent |
+| `gateway.networking.k8s.io/v1beta1` ReferenceGrant | `zot-<id>` | 0 | маршрут заказа `/v2/<id>/` живёт в namespace маршрутов края (`site.edge.routeNamespace`), Service — здесь; разрешено ровно одно ребро: `HTTPRoute` из этого namespace → `Service zot-<id>` |
+
+Без `ReferenceGrant` Gateway API межнамеспейсную ссылку маршрута не разрешает
+(`ResolvedRefs=False`, `RefNotPermitted`), и регистри не становится доступен. Разрешение —
+узкое: прочие Service арендатора маршрутам края закрыты, маршруты из других namespace (в
+том числе из namespace арендатора) на `zot-<id>` сослаться не могут. Сам маршрут ставит
+registry-operator; namespace арендатора меток края не получает.
 
 PVC нет: данные zot — только в S3; под временное (метаданные, загрузки до выгрузки) —
 `emptyDir` с пределом `site.resources.scratchSizeLimit`. Образы — только по digest.
@@ -51,23 +58,52 @@ Argo CD.
   projected-токеном SA `zot-<id>` с аудиторией `site.registryOperator.tokenAudience` (том только
   в этом контейнере; оператор сверяет его через TokenReview).
 
-Интерфейс iam-proxy, на который опирается чарт (`cmd/iam-proxy`):
+### Интерфейс iam-proxy
+
+Чарт запускает `cmd/iam-proxy` ровно с этими флагами (`internal/iamproxy/config.go`): проба
+`charts/tests` сверяет аргументы контейнера с этой таблицей, лишний или пропущенный флаг —
+красное. Каждый внешний вызов прокси несёт свой дедлайн: Check — `--check-timeout`, заявка —
+`--enroll-timeout`, набор ключей и `/readyz` zot — собственные сроки клиента.
 
 | флаг | значение |
 |---|---|
 | `--listen=:8080` | слушатель запросов клиентов (через прокси Envoy Gateway) |
-| `--health-listen=:8081` | слушатель проб: `GET /readyz`, `GET /healthz`; в Service не выходит |
+| `--health-listen=:8081` | слушатель проб и метрик: `GET /readyz`, `GET /healthz`, `GET /metrics`; в Service не выходит |
 | `--upstream=http://127.0.0.1:5000` | zot |
+| `--upstream-ready-path=/readyz` | путь готовности zot (есть в zot `v2.1.20`), который спрашивает `/readyz` прокси |
 | `--registry-id=<id>` | цель проверки: `registry_registry:<id>` и `registry_repository:<id>/<repo>` |
-| `--anonymous-pull=<true\|false>` | `Registry.spec.public`: pull без токена; прочее — только с токеном |
-| `--kaname-api-url=<https://…>` | публичный API kaname (`AuthorizeService.Check`) |
+| `--public=<true\|false>` | `Registry.spec.public`: pull без токена; прочее — только с токеном. Единственный механизм публичности: кортежей с подстановочным субъектом никто не пишет |
 | `--jwks-url=<https://…>` | набор ключей kaname |
+| `--jwks-ca=<путь>` | CA площадки, под которым отдаётся набор ключей |
 | `--issuer=<iss>` | `iss` принимаемых токенов |
 | `--audience=<aud>` | `aud` принимаемых токенов |
-| `--ca-file=<путь>` | CA площадки для kaname и эндпоинта регистрации |
-| `--decision-cache-ttl=<1s…10s>` | окно кэша вердиктов |
-| `--registration-url=<https://…>` | эндпоинт регистрации нового репозитория (registry-operator) |
-| `--registration-token-file=/var/run/secrets/registry-operator/token` | projected-токен SA `zot-<id>` для эндпоинта регистрации |
+| `--kaname-address=<host:port>` | публичный gRPC kaname (`AuthorizeService.Check`); `:9091` схема отвергает |
+| `--kaname-server-name=<имя>` | имя в сертификате публичного gRPC kaname |
+| `--kaname-ca=<путь>` | CA площадки для kaname |
+| `--check-timeout=<1s…30s>` | дедлайн одного Check |
+| `--cache-ttl=<1s…10s>` | окно кэша вердиктов |
+| `--enroll-url=<https://host[:port]>` | эндпоинт регистрации нового репозитория (registry-operator), без пути |
+| `--enroll-ca=<путь>` | CA площадки для эндпоинта регистрации |
+| `--enroll-token-file=/var/run/secrets/registry-operator/token` | projected-токен SA `zot-<id>` для эндпоинта регистрации |
+| `--enroll-timeout=<1s…60s>` | дедлайн одной заявки |
+| `--realm=<https://…>` | `realm` в `WWW-Authenticate`: выдача токена края `/iam/token` |
+| `--service=<имя>` | `service` в `WWW-Authenticate` |
+
+### Пробы пода
+
+| путь | контейнер | смысл |
+|---|---|---|
+| `GET /readyz` (`:8081`) | iam-proxy | `200`, только если `GET <upstream><upstream-ready-path>` у zot вернул `200` в пределах своего дедлайна **и** набор ключей kaname загружен хотя бы раз; иначе `503`. Доступность Check kaname в готовность **не** входит: её отказ — отказ запроса, а не снятие пода |
+| `GET /healthz` (`:8081`) | iam-proxy | `200`, пока жив процесс прокси; ни zot, ни kaname не спрашивает |
+
+- `startupProbe` — `/readyz`, до 300 с (`5 с × 60`): столько ждёт под старта zot (S3,
+  загрузка метаданных), прежде чем включится liveness.
+- `readinessProbe` — `/readyz`: пока zot не готов, под не Ready, Envoy на него трафик не шлёт,
+  registry-operator не ставит `Registry` в Ready.
+- `livenessProbe` — `/healthz`: перезапуск лечит только прокси.
+- **У zot проб нет, и это решение:** zot слушает только loopback пода, kubelet до него не
+  достаёт. Зависший zot даёт Unready (трафик снят, `Registry` не Ready), а не перезапуск —
+  перезапуск при сбое S3 не лечит сбой и множит холодные старты.
 
 Права, которые спрашивает прокси: pull — `v_get` на `registry_repository:<id>/<repo>`; push в
 зарегистрированный репозиторий — `v_update` на нём; новый репозиторий (не зарегистрирован) —
@@ -86,7 +122,7 @@ Argo CD.
 | выход | DNS (`site.network.dns`), только имена S3, Vault, kaname и эндпоинта регистрации | UDP/TCP 53 |
 | выход | S3 заказа — хост и порт из `storage.endpoint` | TCP (443 по умолчанию) |
 | выход | Vault — `site.network.vault` | порты пира |
-| выход | публичный API kaname (Check, JWKS) — `site.network.kaname` | порты пира, кроме 9091 |
+| выход | публичный gRPC kaname (Check) и JWKS — `site.network.kaname` | порты пира, кроме 9091 |
 | выход | эндпоинт регистрации registry-operator — `site.network.registryOperator` | порты пира |
 
 Внутренний листенер kaname `:9091` из плоскости данных недостижим: схема отвергает такой порт.
@@ -129,8 +165,13 @@ Argo CD.
 `Addon` заказа оператор ставит на этапе 2 пайплайна: после готовности `S3BucketClaim` и
 `VaultClaim` (лист с ключами записан, роль заведена), iam `ServiceAccount` робота и кортежа
 `registry_registry:<id>`; параллельно — `AccessBinding` робота. Готовность zot оператор
-читает сам: `Deployment zot-<id>` Available в namespace `<login>`; маршрут заказа (этап 3)
-ставит на `Service zot-<id>:8080`.
+читает сам: `Deployment zot-<id>` в namespace `<login>` сошёлся на текущей ревизии
+(`observedGeneration == generation`, `updatedReplicas == availableReplicas == 1`) и
+`Application` синхронизирован на текущих переменных и `syncEpoch` — иначе «Available» говорит о
+прежней ревизии (например, о поде, который ещё отдаёт анонимный pull после смены `public`).
+Готовность пода держит `/readyz` iam-proxy, то есть готовность самого zot (выше, «Пробы
+пода»). Маршрут заказа (этап 3) оператор ставит в `site.edge.routeNamespace` на
+`Service zot-<id>:8080`; ссылку разрешает `ReferenceGrant` этого чарта.
 
 ### Константы площадки (`site`)
 
@@ -139,13 +180,17 @@ Argo CD.
 | `site.caBundle.{configMap,key}` | ConfigMap с CA Vault, публичного API kaname и эндпоинта регистрации в namespace арендатора |
 | `site.vault.address` | `https://` Vault для vault-agent |
 | `site.vault.tokenAudience` | аудитория projected-токена vault-agent; равна `audience` роли Vault заказа |
-| `site.kaname.apiURL` | `https://` публичного API kaname |
+| `site.kaname.address` | `host:port` публичного gRPC kaname (Check); не `:9091` |
+| `site.kaname.serverName` | имя в сертификате публичного gRPC kaname |
 | `site.kaname.jwksURL` | `https://` набора ключей kaname |
 | `site.kaname.{issuer,audience}` | `iss` и `aud` принимаемых токенов |
-| `site.registryOperator.registrationURL` | `https://` эндпоинта регистрации registry-operator |
+| `site.registryOperator.registrationURL` | `https://host[:port]` эндпоинта регистрации registry-operator, без пути |
 | `site.registryOperator.tokenAudience` | аудитория projected-токена заявки; отлична от аудитории Vault |
 | `site.iamProxy.decisionCacheTTL` | окно кэша вердиктов, `1s`…`10s` |
+| `site.iamProxy.{checkTimeout,enrollTimeout}` | дедлайны Check (`1s`…`30s`) и заявки (`1s`…`60s`) |
+| `site.iamProxy.{realm,service}` | `realm` (`https://`, выдача `/iam/token` края) и `service` в `WWW-Authenticate` |
 | `site.images.{zot,iamProxy}` | `repository`, `tag`, `digest` (обязателен) |
+| `site.edge.routeNamespace` | namespace маршрутов края: единственный источник, которому `ReferenceGrant` открывает `Service zot-<id>`; равен `admission.routeNamespace` платформы |
 | `site.edge.proxy` | namespace прокси Envoy Gateway и `gateway.{name,namespace}` |
 | `site.network.allowKubeletProbes` | вход kubelet на `:8081` |
 | `site.network.dns` | namespace и метки DNS (непустой селектор) |
@@ -158,4 +203,6 @@ Argo CD.
 цепочке «платформа → слой заказа с переменными → экземпляр» с golden-сверкой
 (`charts/tests/golden/instance-*.yaml`), отрицательные пробы значений с законным близнецом,
 проверки формы (ровно zot и iam-proxy, нет PVC и сертификата, образы по digest, токен заявки
-только в iam-proxy, ровно перечисленные направления сети), kubeconform по закреплённым CRD.
+только в iam-proxy, ровно перечисленные направления сети, один `ReferenceGrant` с одним
+источником и одной целью, флаги iam-proxy — ровно таблица интерфейса, готовность — `/readyz`
+поверх zot), kubeconform по закреплённым CRD.

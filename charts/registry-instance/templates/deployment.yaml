@@ -88,20 +88,30 @@ spec:
         - name: iam-proxy
           image: {{ include "ri.image" .Values.site.images.iamProxy | toJson }}
           imagePullPolicy: IfNotPresent
+          # Флаги — контракт cmd/iam-proxy (README.md, «Интерфейс iam-proxy»); перечень
+          # сверяет проба charts/tests с таблицей README, лишний или пропущенный флаг — красное.
           args:
             - --listen=:8080
             - --health-listen=:8081
             - --upstream=http://127.0.0.1:5000
+            - --upstream-ready-path=/readyz
             - {{ printf "--registry-id=%s" .Values.instance.id | toJson }}
-            - {{ printf "--anonymous-pull=%t" .Values.instance.public | toJson }}
-            - {{ printf "--kaname-api-url=%s" .Values.site.kaname.apiURL | toJson }}
+            - {{ printf "--public=%t" .Values.instance.public | toJson }}
             - {{ printf "--jwks-url=%s" .Values.site.kaname.jwksURL | toJson }}
+            - {{ printf "--jwks-ca=%s" $caPath | toJson }}
             - {{ printf "--issuer=%s" .Values.site.kaname.issuer | toJson }}
             - {{ printf "--audience=%s" .Values.site.kaname.audience | toJson }}
-            - {{ printf "--ca-file=%s" $caPath | toJson }}
-            - {{ printf "--decision-cache-ttl=%s" .Values.site.iamProxy.decisionCacheTTL | toJson }}
-            - {{ printf "--registration-url=%s" .Values.site.registryOperator.registrationURL | toJson }}
-            - {{ printf "--registration-token-file=%s/token" $tokenDir | toJson }}
+            - {{ printf "--kaname-address=%s" .Values.site.kaname.address | toJson }}
+            - {{ printf "--kaname-server-name=%s" .Values.site.kaname.serverName | toJson }}
+            - {{ printf "--kaname-ca=%s" $caPath | toJson }}
+            - {{ printf "--check-timeout=%s" .Values.site.iamProxy.checkTimeout | toJson }}
+            - {{ printf "--cache-ttl=%s" .Values.site.iamProxy.decisionCacheTTL | toJson }}
+            - {{ printf "--enroll-url=%s" .Values.site.registryOperator.registrationURL | toJson }}
+            - {{ printf "--enroll-ca=%s" $caPath | toJson }}
+            - {{ printf "--enroll-token-file=%s/token" $tokenDir | toJson }}
+            - {{ printf "--enroll-timeout=%s" .Values.site.iamProxy.enrollTimeout | toJson }}
+            - {{ printf "--realm=%s" .Values.site.iamProxy.realm | toJson }}
+            - {{ printf "--service=%s" .Values.site.iamProxy.service | toJson }}
           ports:
             - name: proxy
               containerPort: 8080
@@ -109,12 +119,24 @@ spec:
             - name: health
               containerPort: 8081
               protocol: TCP
+          # Готовность пода — /readyz iam-proxy: 200, только пока zot отвечает 200 на свой
+          # /readyz (127.0.0.1:5000, --upstream-ready-path) в пределах дедлайна и набор ключей
+          # kaname загружен хотя бы раз; доступность Check kaname в готовность не входит.
+          # zot слушает loopback, kubelet до него не достаёт, поэтому своих проб у zot нет:
+          # зависший zot даёт Unready (трафик снят, Registry не Ready), а не перезапуск.
+          startupProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            periodSeconds: 5
+            failureThreshold: 60
           readinessProbe:
             httpGet:
               path: /readyz
               port: health
             periodSeconds: 10
             failureThreshold: 3
+          # Живость — только процесс iam-proxy: перезапуск пода из-за S3 или kaname не лечит ни то, ни другое.
           livenessProbe:
             httpGet:
               path: /healthz

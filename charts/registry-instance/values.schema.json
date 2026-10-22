@@ -273,6 +273,20 @@
       "description": "Verdict cache window, 1s..10s.",
       "type": "string",
       "pattern": "^([1-9]|10)s$"
+    },
+    "grpcAddress": {
+      "description": "host:port of the public kaname gRPC; the internal listener :9091 is never reachable from the data plane.",
+      "type": "string",
+      "maxLength": 260,
+      "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?:[0-9]{1,5}$",
+      "not": {
+        "pattern": ":9091$"
+      }
+    },
+    "deadline": {
+      "description": "Deadline of one outbound call, whole seconds.",
+      "type": "string",
+      "pattern": "^[1-9][0-9]?s$"
     }
   },
   "properties": {
@@ -411,15 +425,18 @@
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "apiURL",
+            "address",
+            "serverName",
             "jwksURL",
             "issuer",
             "audience"
           ],
           "properties": {
-            "apiURL": {
-              "description": "Public kaname API (AuthorizeService.Check).",
-              "$ref": "#/definitions/httpsURL"
+            "address": {
+              "$ref": "#/definitions/grpcAddress"
+            },
+            "serverName": {
+              "$ref": "#/definitions/dnsName"
             },
             "jwksURL": {
               "$ref": "#/definitions/httpsURL"
@@ -441,7 +458,8 @@
           ],
           "properties": {
             "registrationURL": {
-              "$ref": "#/definitions/httpsURL"
+              "description": "https://host[:port] of the registry-operator enrollment endpoint; iam-proxy appends the request path itself.",
+              "$ref": "#/definitions/httpsOrigin"
             },
             "tokenAudience": {
               "$ref": "#/definitions/audience"
@@ -452,11 +470,43 @@
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "decisionCacheTTL"
+            "decisionCacheTTL",
+            "checkTimeout",
+            "enrollTimeout",
+            "realm",
+            "service"
           ],
           "properties": {
             "decisionCacheTTL": {
               "$ref": "#/definitions/verdictTTL"
+            },
+            "checkTimeout": {
+              "description": "1s..30s: iam-proxy refuses to start outside (0, 30s].",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/deadline"
+                },
+                {
+                  "pattern": "^([1-9]|[12][0-9]|30)s$"
+                }
+              ]
+            },
+            "enrollTimeout": {
+              "description": "1s..60s: iam-proxy refuses to start outside (0, 1m].",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/deadline"
+                },
+                {
+                  "pattern": "^([1-9]|[1-5][0-9]|60)s$"
+                }
+              ]
+            },
+            "realm": {
+              "$ref": "#/definitions/httpsURL"
+            },
+            "service": {
+              "$ref": "#/definitions/dnsName"
             }
           }
         },
@@ -480,9 +530,14 @@
           "type": "object",
           "additionalProperties": false,
           "required": [
+            "routeNamespace",
             "proxy"
           ],
           "properties": {
+            "routeNamespace": {
+              "description": "Namespace of the edge routes: the only HTTPRoute namespace the ReferenceGrant of this registry admits.",
+              "$ref": "#/definitions/dnsLabel"
+            },
             "proxy": {
               "type": "object",
               "additionalProperties": false,

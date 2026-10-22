@@ -1,5 +1,5 @@
 # Чарт ставит ровно zot одного регистри с прокси прав iam-proxy: ServiceAccount, сетевую
-# политику пода, Service и Deployment. Бакет, роль Vault, учётку и выдачу kaname, кортеж
+# политику пода, Service, Deployment и ReferenceGrant маршрута заказа к Service. Бакет, роль Vault, учётку и выдачу kaname, кортеж
 # ресурса и маршрут края заводит и ведёт registry-operator сам; сюда он передаёт только
 # пути к ним — через Addon.spec.variables и слой заказа платформы (README.md, «Контракт»).
 #
@@ -50,8 +50,11 @@ site:
     # Аудитория projected-токена SA пода для входа vault-agent; равна audience роли.
     tokenAudience: vault
   kaname:
-    # Публичный API kaname: AuthorizeService.Check токеном клиента «о себе».
-    apiURL: ""
+    # Публичный gRPC kaname (host:port): AuthorizeService.Check токеном клиента «о себе»;
+    # внутренний листенер :9091 схема отвергает.
+    address: ""
+    # Имя в сертификате публичного gRPC kaname.
+    serverName: ""
     # Набор ключей kaname (JWKS); только https.
     jwksURL: ""
     # iss токенов kaname, которые принимает прокси.
@@ -59,7 +62,8 @@ site:
     # aud токенов kaname, которые принимает прокси.
     audience: registry
   registryOperator:
-    # Эндпоинт регистрации нового репозитория (registry-operator); только https.
+    # Эндпоинт регистрации нового репозитория (registry-operator): https://host[:port]
+    # без пути — путь заявки iam-proxy дописывает сам.
     registrationURL: ""
     # Аудитория projected-токена SA пода, которым прокси входит в эндпоинт регистрации;
     # registry-operator проверяет её через TokenReview.
@@ -67,6 +71,14 @@ site:
   iamProxy:
     # Срок кэша вердиктов Check по (хэш токена, объект, глагол): 1s–10s.
     decisionCacheTTL: ""
+    # Дедлайн одного Check kaname: 1s–30s.
+    checkTimeout: ""
+    # Дедлайн одной заявки на регистрацию: 1s–60s.
+    enrollTimeout: ""
+    # Куда клиент docker идёт за токеном (WWW-Authenticate realm): выдача /iam/token края.
+    realm: ""
+    # service в запросе токена клиента.
+    service: ""
   images:
     zot:
       repository: ghcr.io/project-zot/zot-linux-amd64
@@ -77,6 +89,9 @@ site:
       tag: ""
       digest: ""
   edge:
+    # namespace маршрутов края: там registry-operator ставит маршрут заказа /v2/<id>/, и
+    # только его HTTPRoute ReferenceGrant zot-<id> пускает к Service zot-<id>.
+    routeNamespace: ""
     # Прокси Envoy Gateway своего Gateway — единственный сетевой источник входа в под.
     proxy:
       namespace: ""
@@ -93,7 +108,7 @@ site:
     # Пиры выхода: {fqdn, ports} | {namespace, labels, ports} | {cidr, ports}.
     # Выход в S3 выводится из storage.endpoint и здесь не задаётся.
     vault: []
-    # Публичный API kaname (Check и JWKS); внутренний листенер :9091 запрещён.
+    # Публичный gRPC kaname (Check) и JWKS; внутренний листенер :9091 запрещён.
     kaname: []
     # Эндпоинт регистрации registry-operator.
     registryOperator: []
