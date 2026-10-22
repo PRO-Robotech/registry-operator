@@ -5,6 +5,7 @@ package controller_test
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/tools/events"
 	clocktesting "k8s.io/utils/clock/testing"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -25,6 +27,10 @@ import (
 )
 
 const foreignFinalizer = "platform.example.test/audit"
+
+// errPassStopped — проход остановлен сразу после патча финализатора:
+// предмет проб — только патч, дальше пайплайн не идёт.
+var errPassStopped = errors.New("pass stopped after the finalizer patch")
 
 // racingClient — клиент, у которого между чтением заказа и патчем его
 // финализаторов другой писатель меняет их перечень.
@@ -53,12 +59,16 @@ func racingClient(t *testing.T, reg *registryv1alpha1.Registry, race func(*regis
 				}
 				return c.Patch(ctx, obj, patch, opts...)
 			},
+			Create: func(context.Context, client.WithWatch, client.Object, ...client.CreateOption) error {
+				return errPassStopped
+			},
 		}).Build()
 }
 
 func finalizerReconciler(c client.Client) *controller.RegistryReconciler {
 	return &controller.RegistryReconciler{Client: c, Deps: &controller.Deps{
 		Config: conf, APIReader: c, Kaname: kn.Direct(), Clock: clocktesting.NewFakePassiveClock(time.Now()),
+		Recorder: events.NewFakeRecorder(16),
 	}}
 }
 
