@@ -78,8 +78,10 @@ func (r *RegistryReconciler) finalize(ctx context.Context, reg *registryv1alpha1
 	return ctrl.Result{}, r.dropFinalizer(ctx, reg)
 }
 
+// dropFinalizer снимает финализатор заказа под версией объекта: без неё
+// merge patch вернул бы финализатор, снятый другим писателем после чтения.
 func (r *RegistryReconciler) dropFinalizer(ctx context.Context, reg *registryv1alpha1.Registry) error {
-	patch := client.MergeFrom(reg.DeepCopy())
+	patch := client.MergeFromWithOptions(reg.DeepCopy(), client.MergeFromWithOptimisticLock{})
 	controllerutil.RemoveFinalizer(reg, registryv1alpha1.RegistryFinalizer)
 	return client.IgnoreNotFound(r.Patch(ctx, reg, patch))
 }

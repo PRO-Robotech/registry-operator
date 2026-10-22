@@ -21,9 +21,11 @@ import (
 )
 
 // resolveScope — проект и аккаунт IAM заказа. Источник — метки namespace
-// заказа (ставит платформа); первая регистрация закрепляет проект в резерве,
-// и дальше действует закреплённый: перенос регистри под другой проект — не
-// следствие смены метки.
+// заказа (ставит платформа). Проект закрепляется подтверждённой
+// регистрацией (RegisteredAt): дальше действует закреплённый, и перенос
+// регистри под другой проект — не следствие смены метки. До подтверждения
+// действует метка: намерение под прежней меткой переносится (см.
+// ensureRegistration).
 func (r *RegistryReconciler) resolveScope(ctx context.Context, p *pass) (kaname.Scope, error) {
 	ns := &corev1.Namespace{}
 	if err := r.Get(ctx, types.NamespacedName{Name: p.reg.Namespace}, ns); err != nil {
@@ -33,7 +35,7 @@ func (r *RegistryReconciler) resolveScope(ctx context.Context, p *pass) (kaname.
 		Project: ns.Labels[registryv1alpha1.LabelNamespaceProject],
 		Account: ns.Labels[registryv1alpha1.LabelNamespaceAccount],
 	}
-	if rec := p.reservation.Status.Registration; rec != nil {
+	if rec := p.reservation.Status.Registration; rec != nil && rec.RegisteredAt != nil {
 		if labeled.Project != rec.Project {
 			return kaname.Scope{}, &refusal{reason: registryv1alpha1.ReasonProjectChanged,
 				msg: fmt.Sprintf("registry is registered under project %s; namespace %s names %q", rec.Project, ns.Name, labeled.Project)}
@@ -76,8 +78,8 @@ func (r *RegistryReconciler) ensureRegistration(ctx context.Context, p *pass, sc
 		return true, nil
 	}
 
-	// Намерение — до вызова: проект закреплён раньше, чем запись в IAM
-	// может состояться, и снятие всегда знает, под чем снимать.
+	// Намерение — до вызова: проект записан раньше, чем запись в IAM может
+	// состояться, и снятие всегда знает, под чем снимать.
 	res, err := r.reservations().Mutate(ctx, reg.Spec.ID, func(res *registryv1alpha1.RegistryIDReservation) error {
 		if err := ownReservation(res, reg); err != nil {
 			return err
@@ -92,6 +94,9 @@ func (r *RegistryReconciler) ensureRegistration(ctx context.Context, p *pass, sc
 		return false, err
 	}
 	p.reservation = res
+	if done, err := r.moveIntent(ctx, p, scope); !done {
+		return false, err
+	}
 
 	err = r.Kaname.Register(ctx, kaname.RegistryRegistration(reg.Spec.ID, scope, registryVersion(reg)))
 	if done, err := r.registrationOutcome(p, obj, err); !done {
@@ -121,6 +126,48 @@ func (r *RegistryReconciler) ensureRegistration(ctx context.Context, p *pass, sc
 	metrics.Registrations.WithLabelValues("registered").Inc()
 	return true, nil
 }
+
+// moveIntent переносит неподтверждённое намерение под область метки. Вызов
+// под прежним намерением мог дойти до IAM с потерянным ответом; повтор той
+// же версией с новой цепью kaname не применит (версия не новее), и прежняя
+// цепь осталась бы рядом с новой. Поэтому сначала запись под прежним
+// намерением снимается, и только потом намерение переносится. true —
+// намерение совпадает с областью метки.
+func (r *RegistryReconciler) moveIntent(ctx context.Context, p *pass, scope kaname.Scope) (bool, error) {
+	reg := p.reg
+	prev := p.reservation.Status.Registration
+	if prev.RegisteredAt != nil || (prev.Project == scope.Project && prev.Account == scope.Account) {
+		return true, nil
+	}
+	obj := kaname.RegistryObject(reg.Spec.ID)
+	if prev.Project != "" {
+		old := kaname.Scope{Project: prev.Project, Account: prev.Account}
+		err := r.Kaname.Unregister(ctx, kaname.RegistryRegistration(reg.Spec.ID, old, registryVersion(reg)))
+		if done, err := r.registrationOutcome(p, obj, err); !done {
+			return false, err
+		}
+	}
+	res, err := r.reservations().Mutate(ctx, reg.Spec.ID, func(res *registryv1alpha1.RegistryIDReservation) error {
+		if err := ownReservation(res, reg); err != nil {
+			return err
+		}
+		cur := res.Status.Registration
+		if cur == nil || cur.RegisteredAt != nil {
+			return errIntentChanged
+		}
+		cur.Project, cur.Account = scope.Project, scope.Account
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	p.reservation = res
+	return true, nil
+}
+
+// errIntentChanged — намерение регистрации изменилось между чтением и
+// переносом (подтверждено либо снято): проход повторяется с чтения.
+var errIntentChanged = errors.New("registration intent changed while it was being moved")
 
 // registrationOutcome переводит исход вызова IAM в состояние шага. false —
 // шаг не готов (с ошибкой-отказом либо без ошибки при недоступности).

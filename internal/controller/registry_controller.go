@@ -92,7 +92,10 @@ func (r *RegistryReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return r.finalize(ctx, reg)
 	}
 	if !controllerutil.ContainsFinalizer(reg, registryv1alpha1.RegistryFinalizer) {
-		patch := client.MergeFrom(reg.DeepCopy())
+		// Перечень финализаторов — массив, и merge patch заменяет его
+		// целиком: без версии объекта патч стёр бы финализатор, поставленный
+		// другим писателем после чтения. Конфликт — повтор прохода.
+		patch := client.MergeFromWithOptions(reg.DeepCopy(), client.MergeFromWithOptimisticLock{})
 		controllerutil.AddFinalizer(reg, registryv1alpha1.RegistryFinalizer)
 		if err := r.Patch(ctx, reg, patch); err != nil {
 			return ctrl.Result{}, err
