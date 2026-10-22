@@ -289,3 +289,27 @@ injections:
     new: "\tcase http.StatusUnauthorized:\n\t\treturn false, nil\n"
     package: ./internal/iamproxy/
     tests: [TestProxy_TokenKanameDoesNotAuthenticateIsNotAnAllow]
+  - name: bucket-endpoint-over-http-accepted
+    file: internal/policy/storage.go
+    old: "\t\tcase \"https\":\n\t\t\trest = after\n\t\tcase \"http\":\n"
+    new: "\t\tcase \"https\", \"http\":\n\t\t\trest = after\n\t\tcase \"http-refused\":\n"
+    package: ./internal/desired/
+    tests: [TestBuild_AddonEndpointIsTheHTTPSOriginOfTheBucket]
+  - name: bucket-endpoint-host-not-normalized
+    file: internal/desired/desired.go
+    old: "\t\t\tvars[policy.VarEndpoint] = origin\n"
+    new: "\t\t\t_ = origin\n"
+    package: ./internal/desired/
+    tests: [TestBuild_AddonEndpointIsTheHTTPSOriginOfTheBucket]
+  - name: addon-region-form-dropped
+    file: internal/policy/storage.go
+    old: "\tVarRegion: checkRegion,\n"
+    new: ""
+    package: ./internal/desired/
+    tests: [TestBuild_AddonRegionIsANonEmptyRegionName]
+  - name: revision-without-a-region-accepted
+    file: internal/policy/storage.go
+    old: "\tif err := checkRegion(region); err != nil {\n"
+    new: "\tif err := checkRegion(region); err != nil && region != \"\" {\n"
+    package: ./internal/controller/
+    tests: [TestRegistryTemplate_ParamsWithoutARegionAreNotAccepted]

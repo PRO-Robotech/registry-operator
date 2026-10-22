@@ -1,5 +1,6 @@
 # Addon заказа отвечает на один вопрос — поставить zot с нужными путями: бакет,
-# endpoint, лист Vault и роль Vault берутся из статусов готовых шагов.
+# endpoint, лист Vault и роль Vault берутся из статусов готовых шагов. Endpoint
+# бакета оператор приводит к https://<host>[:port] (простой http — отказ политики).
 apiVersion: observed.registry.in-cloud.io/v1alpha1
 kind: ObservedAddonTemplate
 metadata:

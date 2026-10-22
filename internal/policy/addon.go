@@ -412,6 +412,11 @@ func checkVariables(v *Violations, vars map[string]string, o Order, templateVars
 		if val := vars[k]; len(val) > maxVariableValue || !extraVarVal.MatchString(val) {
 			v.add("spec.variables."+k, "value must match %s and hold at most %d bytes", extraVarVal.String(), maxVariableValue)
 		}
+		if form, ok := variableForms[k]; ok {
+			if err := form(vars[k]); err != nil {
+				v.add("spec.variables."+k, "%v", err)
+			}
+		}
 	}
 }
 

@@ -144,6 +144,26 @@ func TestValidate_EachRefusalHasALawfulTwin(t *testing.T) {
 		{"addon another release", kinds.Addon, "workload", func(u *unstructured.Unstructured) { set(t, u, "zot-other", "spec", "releaseName") }, "spec.releaseName"},
 		{"addon unknown plugin", kinds.Addon, "workload", func(u *unstructured.Unstructured) { set(t, u, "my-plugin", "spec", "pluginName") }, "spec.pluginName"},
 		{"addon in a namespace", kinds.Addon, "workload", func(u *unstructured.Unstructured) { u.SetNamespace("cust01") }, "metadata.name"},
+		{"addon endpoint over http", kinds.Addon, "workload", func(u *unstructured.Unstructured) {
+			set(t, u, "http://s3.example.test", "spec", "variables", "endpoint")
+		}, "spec.variables.endpoint"},
+		{"addon endpoint with a path", kinds.Addon, "workload", func(u *unstructured.Unstructured) {
+			set(t, u, "https://s3.example.test/bucket", "spec", "variables", "endpoint")
+		}, "spec.variables.endpoint"},
+		{"addon endpoint without a scheme", kinds.Addon, "workload", func(u *unstructured.Unstructured) {
+			set(t, u, "s3.example.test", "spec", "variables", "endpoint")
+		}, "spec.variables.endpoint"},
+		{"addon endpoint in upper case", kinds.Addon, "workload", func(u *unstructured.Unstructured) {
+			set(t, u, "https://S3.example.test", "spec", "variables", "endpoint")
+		}, "spec.variables.endpoint"},
+		{"addon without a region", kinds.Addon, "workload", func(u *unstructured.Unstructured) { set(t, u, "", "spec", "variables", "region") }, "spec.variables.region"},
+		{"addon region not a name", kinds.Addon, "workload", func(u *unstructured.Unstructured) { set(t, u, "RU_1", "spec", "variables", "region") }, "spec.variables.region"},
+		{"addon selects the platform Addon layers", kinds.Addon, "workload", func(u *unstructured.Unstructured) {
+			sels, _, _ := unstructured.NestedSlice(u.Object, "spec", "valuesSelectors")
+			s := sels[0].(map[string]any)
+			s["matchLabels"] = map[string]any{"addons.in-cloud.io/addon": "registry-platform", "addons.in-cloud.io/values": "edge"}
+			set(t, u, []any{s, sels[1]}, "spec", "valuesSelectors")
+		}, "spec.valuesSelectors[0].matchLabels"},
 
 		{"route in a namespace outside the list", kinds.HTTPRoute, "route", func(u *unstructured.Unstructured) { u.SetNamespace("kube-system") }, "metadata.namespace"},
 		{"route foreign host", kinds.HTTPRoute, "route", func(u *unstructured.Unstructured) { set(t, u, []any{"evil.example.test"}, "spec", "hostnames") }, "spec.hostnames"},

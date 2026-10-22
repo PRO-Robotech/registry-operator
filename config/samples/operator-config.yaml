@@ -43,7 +43,8 @@ policy:
       allowed: [ServerSideApply=true, FailOnSharedResource=true, ApplyOutOfSyncOnly=true]
       required: [FailOnSharedResource=true]
     maxRetryLimit: 10
-    valuesAddonPrefix: registry-platform
+    # Слои order и site чарта registry-platform (addons.in-cloud.io/addon = его addonName).
+    valuesAddonPrefix: registry-instance
     templateVariables: [bucket, endpoint, region, vaultSecretPath, vaultAuthMount, vaultRole]
 chartVerification:
   timeout: 10s

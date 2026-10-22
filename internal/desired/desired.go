@@ -202,6 +202,16 @@ func Build(k kinds.Kind, tpl observedv1alpha1.Template, in Input) (*unstructured
 		for key, val := range in.Order(chart).OrderVariableValues() {
 			vars[key] = val
 		}
+		// Endpoint бакета — всегда https-origin: хост из status.endpoint
+		// бакета оператор приводит к https://<host>[:port], простой http и
+		// прочие формы — отказ, а не Addon, который чарт отверг бы.
+		if raw, ok := vars[policy.VarEndpoint].(string); ok {
+			origin, err := policy.HTTPSOrigin(raw)
+			if err != nil {
+				return nil, &PolicyError{Err: &policy.Violations{Kind: k.GVK.Kind, Items: []policy.Violation{{Field: "spec.variables." + policy.VarEndpoint, Reason: err.Error()}}}}
+			}
+			vars[policy.VarEndpoint] = origin
+		}
 		spec["variables"] = vars
 		annotations[registryv1alpha1.AnnotationChartDigest] = pin.Digest
 	case kinds.HTTPRoute.GVK:
