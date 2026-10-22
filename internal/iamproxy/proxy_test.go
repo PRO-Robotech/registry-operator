@@ -225,10 +225,31 @@ func (e *env) token(subject string, edit func(jwt.MapClaims, map[string]any)) st
 
 func (e *env) do(method, path, token string, hdr ...string) *http.Response {
 	e.t.Helper()
-	req, _ := http.NewRequest(method, e.proxy.URL+path, nil)
 	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+		hdr = append([]string{"Authorization", "Bearer " + token}, hdr...)
 	}
+	return e.send(method, path, hdr...)
+}
+
+// basic — тот же токен kaname паролем схемы Basic (docker login): имя
+// пользователя любое.
+func basic(user, token string) string {
+	return "Basic " + base64.StdEncoding.EncodeToString([]byte(user+":"+token))
+}
+
+// present — запрос с токеном, предъявленным схемой scheme ("bearer" либо
+// "basic").
+func (e *env) present(scheme, method, path, token string) *http.Response {
+	e.t.Helper()
+	if scheme == "basic" {
+		return e.send(method, path, "Authorization", basic("robot$any-name", token))
+	}
+	return e.do(method, path, token)
+}
+
+func (e *env) send(method, path string, hdr ...string) *http.Response {
+	e.t.Helper()
+	req, _ := http.NewRequest(method, e.proxy.URL+path, nil)
 	for i := 0; i+1 < len(hdr); i += 2 {
 		req.Header.Set(hdr[i], hdr[i+1])
 	}
@@ -247,59 +268,81 @@ func (e *env) registerRepo(repo string) {
 		ParentChain: []string{kaname.RegistryObject(regID), "project:prj1"}, ParentProjectID: "prj1", ParentAccountID: "acc1"})
 }
 
+// basicChallenge — вызов клиенту без кредов: docker login с паролем —
+// токеном kaname; выдачи токена у прокси нет.
+const basicChallenge = `Basic realm="registry"`
+
 const (
 	pullPath = "/v2/" + regID + "/team/app/manifests/latest"
 	pushPath = "/v2/" + regID + "/team/app/manifests/v1"
 	newPush  = "/v2/" + regID + "/team/fresh/blobs/uploads/"
 )
 
-// Таблица прав: на каждую выдачу — pull и push, и дошёл ли запрос до zot.
+// Таблица прав: на каждую выдачу — pull, push, новый репозиторий и
+// удаление, и дошёл ли запрос до zot. Таблица одна для обычного токена
+// kaname служебной учётки и человека, предъявленного Bearer и паролем
+// Basic (docker login): аутентификация и право у прокси те же, что у API.
 func TestProxy_RightsTable(t *testing.T) {
-	const subject = "service_account:sva1"
 	cases := []struct {
 		name     string
-		grant    *kanametest.Grant
+		grant    func(subject string) *kanametest.Grant
 		pull     int
 		push     int
 		newRepo  int
 		deletion int
 	}{
-		{"no grant", nil, 403, 403, 403, 403},
-		{"puller on the registry", &kanametest.Grant{Subject: subject, Role: kanametest.RolePuller, Registry: regID}, 200, 403, 403, 403},
-		{"pusher on the registry", &kanametest.Grant{Subject: subject, Role: kanametest.RolePusher, Registry: regID}, 200, 200, 200, 403},
-		{"admin on the registry", &kanametest.Grant{Subject: subject, Role: kanametest.RoleAdmin, Registry: regID}, 200, 200, 200, 200},
-		{"pusher on the account (cascade)", &kanametest.Grant{Subject: subject, Role: kanametest.RolePusher, Account: "acc1"}, 200, 200, 200, 403},
-		{"pusher on another account", &kanametest.Grant{Subject: subject, Role: kanametest.RolePusher, Account: "acc2"}, 403, 403, 403, 403},
-		{"pusher on another registry", &kanametest.Grant{Subject: subject, Role: kanametest.RolePusher, Registry: otherReg}, 403, 403, 403, 403},
+		{"no grant", func(string) *kanametest.Grant { return nil }, 403, 403, 403, 403},
+		{"puller on the registry", func(s string) *kanametest.Grant {
+			return &kanametest.Grant{Subject: s, Role: kanametest.RolePuller, Registry: regID}
+		}, 200, 403, 403, 403},
+		{"pusher on the registry", func(s string) *kanametest.Grant {
+			return &kanametest.Grant{Subject: s, Role: kanametest.RolePusher, Registry: regID}
+		}, 200, 200, 200, 403},
+		{"admin on the registry", func(s string) *kanametest.Grant {
+			return &kanametest.Grant{Subject: s, Role: kanametest.RoleAdmin, Registry: regID}
+		}, 200, 200, 200, 200},
+		{"pusher on the account (cascade)", func(s string) *kanametest.Grant {
+			return &kanametest.Grant{Subject: s, Role: kanametest.RolePusher, Account: "acc1"}
+		}, 200, 200, 200, 403},
+		{"pusher on another account", func(s string) *kanametest.Grant {
+			return &kanametest.Grant{Subject: s, Role: kanametest.RolePusher, Account: "acc2"}
+		}, 403, 403, 403, 403},
+		{"pusher on another registry", func(s string) *kanametest.Grant {
+			return &kanametest.Grant{Subject: s, Role: kanametest.RolePusher, Registry: otherReg}
+		}, 403, 403, 403, 403},
 	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			e := newEnv(t, false)
-			e.registerRepo("team/app")
-			if c.grant != nil {
-				e.fake.AddGrant(*c.grant)
+	for _, subject := range []string{"service_account:sva1", "user:usr1"} {
+		for _, scheme := range []string{"bearer", "basic"} {
+			for _, c := range cases {
+				t.Run(subject+"/"+scheme+"/"+c.name, func(t *testing.T) {
+					e := newEnv(t, false)
+					e.registerRepo("team/app")
+					if g := c.grant(subject); g != nil {
+						e.fake.AddGrant(*g)
+					}
+					tok := e.token(subject, nil)
+					for _, step := range []struct {
+						method, path string
+						want         int
+					}{
+						{http.MethodGet, pullPath, c.pull},
+						{http.MethodPut, pushPath, c.push},
+						{http.MethodPost, newPush, c.newRepo},
+						{http.MethodDelete, pullPath, c.deletion},
+					} {
+						before := e.zot.count()
+						resp := e.present(scheme, step.method, step.path, tok)
+						if resp.StatusCode != step.want {
+							t.Fatalf("%s %s: %d, want %d", step.method, step.path, resp.StatusCode, step.want)
+						}
+						reached := e.zot.count() > before
+						if reached != (step.want == 200) {
+							t.Fatalf("%s %s: zot reached=%v with status %d", step.method, step.path, reached, step.want)
+						}
+					}
+				})
 			}
-			tok := e.token(subject, nil)
-			for _, step := range []struct {
-				method, path string
-				want         int
-			}{
-				{http.MethodGet, pullPath, c.pull},
-				{http.MethodPut, pushPath, c.push},
-				{http.MethodPost, newPush, c.newRepo},
-				{http.MethodDelete, pullPath, c.deletion},
-			} {
-				before := e.zot.count()
-				resp := e.do(step.method, step.path, tok)
-				if resp.StatusCode != step.want {
-					t.Fatalf("%s %s: %d, want %d", step.method, step.path, resp.StatusCode, step.want)
-				}
-				reached := e.zot.count() > before
-				if reached != (step.want == 200) {
-					t.Fatalf("%s %s: zot reached=%v with status %d", step.method, step.path, reached, step.want)
-				}
-			}
-		})
+		}
 	}
 }
 
@@ -364,8 +407,12 @@ func TestProxy_AnonymousAccess(t *testing.T) {
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("anonymous pull from a private registry: %d", resp.StatusCode)
 	}
-	if ch := resp.Header.Get("WWW-Authenticate"); !strings.Contains(ch, `scope="repository:abc123/team/app:pull"`) || !strings.Contains(ch, `service="registry"`) {
-		t.Fatalf("challenge %q", ch)
+	if ch := resp.Header.Get("WWW-Authenticate"); ch != basicChallenge {
+		t.Fatalf("challenge %q, want %q", ch, basicChallenge)
+	}
+	// Вызов один на всякое отсутствие кредов: и на запись, и на версию.
+	if ch := closed.do(http.MethodPut, pushPath, "").Header.Get("WWW-Authenticate"); ch != basicChallenge {
+		t.Fatalf("push challenge %q, want %q", ch, basicChallenge)
 	}
 	if closed.zot.count() != 0 {
 		t.Fatal("anonymous request reached zot")
@@ -432,6 +479,12 @@ func TestProxy_RefusesInvalidTokens(t *testing.T) {
 		"principal with a separator": func(c jwt.MapClaims, _ map[string]any) {
 			c["kaname_principal_id"] = "sva1#member"
 		},
+		// kaname не принимает токен без утверждений принципала, и прокси не
+		// выводит субъекта из sub: логика аутентификации одна с API.
+		"principal named only by sub": func(c jwt.MapClaims, _ map[string]any) {
+			delete(c, "kaname_principal_type")
+			delete(c, "kaname_principal_id")
+		},
 	}
 	for name, edit := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -458,8 +511,17 @@ func TestProxy_RefusesInvalidTokens(t *testing.T) {
 	if resp := e.do(http.MethodGet, pullPath, hsTok); resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("HS256 token: %d", resp.StatusCode)
 	}
-	if resp := e.do(http.MethodGet, pullPath, "", "Authorization", "Basic dXNlcjpwYXNz"); resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("basic credentials: %d", resp.StatusCode)
+	for name, h := range map[string]string{
+		"password that is not a token":   "Basic dXNlcjpwYXNz",
+		"empty password":                 basic("robot", ""),
+		"password that is a foreign jwt": basic("robot", forged),
+		"not base64":                     "Basic !!!",
+		"another scheme":                 "Token " + forged,
+	} {
+		resp := e.send(http.MethodGet, pullPath, "Authorization", h)
+		if resp.StatusCode != http.StatusUnauthorized || resp.Header.Get("WWW-Authenticate") != basicChallenge {
+			t.Fatalf("%s: %d, challenge %q", name, resp.StatusCode, resp.Header.Get("WWW-Authenticate"))
+		}
 	}
 	if e.zot.count() != 0 {
 		t.Fatalf("an invalid token reached zot %d times", e.zot.count())
@@ -528,17 +590,27 @@ func TestProxy_VersionCheck(t *testing.T) {
 	}{
 		{"anonymous on a private registry", false, "", http.StatusUnauthorized, true},
 		{"valid token on a private registry", false, "valid", http.StatusOK, false},
+		{"valid token as the basic password (docker login)", false, "valid-basic", http.StatusOK, false},
 		{"invalid token", false, "garbage", http.StatusUnauthorized, true},
+		{"invalid basic password", false, "garbage-basic", http.StatusUnauthorized, true},
 		{"anonymous on a public registry", true, "", http.StatusOK, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			e := newEnv(t, c.public)
-			tok := c.token
+			scheme, tok := "bearer", c.token
+			if raw, ok := strings.CutSuffix(tok, "-basic"); ok {
+				scheme, tok = "basic", raw
+			}
 			if tok == "valid" {
 				tok = e.token("user:usr1", nil)
 			}
 			for _, m := range []string{http.MethodGet, http.MethodHead} {
-				resp := e.do(m, "/v2/", tok)
+				var resp *http.Response
+				if tok == "" {
+					resp = e.send(m, "/v2/")
+				} else {
+					resp = e.present(scheme, m, "/v2/", tok)
+				}
 				if resp.StatusCode != c.status {
 					t.Fatalf("%s /v2/: %d, want %d", m, resp.StatusCode, c.status)
 				}
@@ -546,8 +618,8 @@ func TestProxy_VersionCheck(t *testing.T) {
 					t.Fatalf("%s /v2/: API version header %q", m, v)
 				}
 				ch := resp.Header.Get("WWW-Authenticate")
-				if c.challenge != (ch != "") || strings.Contains(ch, "scope=") {
-					t.Fatalf("%s /v2/: challenge %q", m, ch)
+				if want := map[bool]string{true: basicChallenge}[c.challenge]; ch != want {
+					t.Fatalf("%s /v2/: challenge %q, want %q", m, ch, want)
 				}
 			}
 			if resp := e.do(http.MethodPost, "/v2/", tok); resp.StatusCode != http.StatusNotFound && resp.StatusCode != http.StatusMethodNotAllowed {

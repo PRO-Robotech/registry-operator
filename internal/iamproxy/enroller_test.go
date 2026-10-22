@@ -82,7 +82,6 @@ func validConfig() iamproxy.Config {
 		KanameAddress: "kaname.iam-system.svc:9090", KanameServerName: "kaname.iam-system.svc", KanameCAFile: "/ca",
 		CheckTimeout: 2e9, CacheTTL: 10e9,
 		EnrollURL: "https://registry-operator.registry-system.svc:8443", EnrollCAFile: "/ca", EnrollTokenFile: "/tok", EnrollTimeout: 15e9,
-		Realm: "https://registry.example.test/iam/token", Service: "registry",
 	}
 }
 
@@ -107,7 +106,6 @@ func TestConfig_RefusesAnIncompleteOrUnsafeConfiguration(t *testing.T) {
 		"registry id with colon":  {func(c *iamproxy.Config) { c.RegistryID = "abc:123" }, "registry-id"},
 		"no token types":          {func(c *iamproxy.Config) { c.TokenTypes = " " }, "token-types"},
 		"check without deadline":  {func(c *iamproxy.Config) { c.CheckTimeout = 0 }, "check-timeout"},
-		"no realm for the client": {func(c *iamproxy.Config) { c.Realm = "" }, "realm"},
 		"relative ready path":     {func(c *iamproxy.Config) { c.UpstreamReadyPath = "readyz" }, "upstream-ready-path"},
 		"ready path with a query": {func(c *iamproxy.Config) { c.UpstreamReadyPath = "/readyz?x=1" }, "upstream-ready-path"},
 	} {
@@ -137,12 +135,27 @@ func TestConfig_TheFlagsOfTheInstanceChartAreUnderstood(t *testing.T) {
 		"--kaname-address=kaname.iam-system.svc:9090", "--kaname-server-name=kaname.iam-system.svc", "--kaname-ca=/ca",
 		"--check-timeout=2s", "--cache-ttl=10s",
 		"--enroll-url=https://registry-operator.registry-system.svc:8443", "--enroll-ca=/ca", "--enroll-token-file=/tok", "--enroll-timeout=15s",
-		"--realm=https://registry.example.test/iam/token", "--service=registry",
 	}
 	if err := fs.Parse(args); err != nil {
 		t.Fatalf("the flags of the instance chart are not understood: %v", err)
 	}
 	if err := c.Validate(); err != nil {
 		t.Fatalf("the configuration of the instance chart is refused: %v", err)
+	}
+}
+
+// Выдачи токена у прокси нет: клиент входит тем же токеном kaname, что и в
+// API (пароль Basic либо Bearer), а вызов без кредов — Basic. Флаги области
+// выдачи (--realm, --service) чарт не передаёт, и прокси их не знает:
+// принятый и не действующий флаг выглядел бы настройкой, которой нет.
+func TestConfig_NoTokenIssuanceFlags(t *testing.T) {
+	for _, flagArg := range []string{"--realm=https://registry.example.test/iam/token", "--service=registry"} {
+		var c iamproxy.Config
+		fs := flag.NewFlagSet("iam-proxy", flag.ContinueOnError)
+		fs.SetOutput(io.Discard)
+		c.BindFlags(fs)
+		if err := fs.Parse([]string{flagArg}); err == nil {
+			t.Fatalf("%s is understood: the proxy announces a token issuance it does not have", flagArg)
+		}
 	}
 }

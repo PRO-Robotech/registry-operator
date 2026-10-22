@@ -197,45 +197,41 @@ func TestValidate_VaultClaimBindsExactlyTheWorkloadAccount(t *testing.T) {
 	}
 }
 
-// Системный класс идёт только за публичностью заказа: anonymous с ролью
-// публичного чтения законен лишь на публичном заказе, authenticated — не
-// законен никогда (иначе любой вошедший читает частный регистри). Каждый
-// отказ стоит рядом с законным близнецом, отличным одним фактом.
-func TestValidate_SystemClassFollowsThePublicityOfTheOrder(t *testing.T) {
+// Публичность — один механизм: флаг --public прокси из spec.public.
+// Выдачи системному классу (anonymous, authenticated) оператор не пишет
+// никогда — ни на частном, ни на публичном заказе. Законный близнец каждого
+// отказа — выдача учётке заказа на том же заказе.
+func TestValidate_SystemClassIsNeverGranted(t *testing.T) {
 	cfg := sampleConfig(t)
 	binding := func(class string) *unstructured.Unstructured {
 		u := goldenObject(t, "access")
 		set(t, u, []any{map[string]any{"systemClass": map[string]any{"name": class}}}, "spec", "subjects")
-		set(t, u, "registry.public.read", "spec", "roleRef", "name")
 		return u
 	}
 	public := order()
 	public.Public = true
 	private := order()
-
-	if err := cfg.Policy.Check(kinds.IamAccessBinding, public, binding("anonymous")); err != nil {
-		t.Fatalf("public read for anonymous on a public order refused: %v", err)
-	}
-	err := cfg.Policy.Check(kinds.IamAccessBinding, private, binding("anonymous"))
-	if err == nil || !strings.Contains(err.Error(), "spec.subjects[0].systemClass.name:") {
-		t.Fatalf("public read for anonymous on a private order accepted: %v", err)
-	}
 	for _, o := range []policy.Order{public, private} {
-		err := cfg.Policy.Check(kinds.IamAccessBinding, o, binding("authenticated"))
-		if err == nil || !strings.Contains(err.Error(), "spec.subjects[0].systemClass.name:") {
-			t.Fatalf("public read for every authenticated subject accepted (public=%v): %v", o.Public, err)
+		if err := cfg.Policy.Check(kinds.IamAccessBinding, o, goldenObject(t, "access")); err != nil {
+			t.Fatalf("the order account grant refused (public=%v): %v", o.Public, err)
+		}
+		for _, class := range []string{"anonymous", "authenticated"} {
+			err := cfg.Policy.Check(kinds.IamAccessBinding, o, binding(class))
+			if err == nil || !strings.Contains(err.Error(), "spec.subjects[0]: a system class is never granted") {
+				t.Fatalf("%s granted (public=%v): %v", class, o.Public, err)
+			}
 		}
 	}
-	// Учётка заказа рядом с анонимом на частном заказе — отказ по анониму,
+	// Учётка заказа рядом с анонимом на публичном заказе — отказ по анониму,
 	// а не по учётке.
-	u := binding("anonymous")
+	u := goldenObject(t, "access")
 	set(t, u, []any{
 		map[string]any{"serviceAccountRef": map[string]any{"name": "zot-abc123-ci"}},
 		map[string]any{"systemClass": map[string]any{"name": "anonymous"}},
 	}, "spec", "subjects")
-	err = cfg.Policy.Check(kinds.IamAccessBinding, private, u)
-	if err == nil || !strings.Contains(err.Error(), "spec.subjects[1].systemClass.name:") || strings.Contains(err.Error(), "spec.subjects[0]") {
-		t.Fatalf("anonymous beside the order account on a private order: %v", err)
+	err := cfg.Policy.Check(kinds.IamAccessBinding, public, u)
+	if err == nil || !strings.Contains(err.Error(), "spec.subjects[1]: a system class is never granted") || strings.Contains(err.Error(), "spec.subjects[0]") {
+		t.Fatalf("anonymous beside the order account on a public order: %v", err)
 	}
 }
 

@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	dto "github.com/prometheus/client_model/go"
 	"google.golang.org/grpc/codes"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -35,6 +36,7 @@ import (
 	"github.com/PRO-Robotech/registry-operator/internal/kaname"
 	"github.com/PRO-Robotech/registry-operator/internal/kaname/kanametest"
 	"github.com/PRO-Robotech/registry-operator/internal/ledger"
+	"github.com/PRO-Robotech/registry-operator/internal/metrics"
 )
 
 const audience = "registry-operator"
@@ -59,6 +61,7 @@ type env struct {
 	now    time.Time
 	limits enroll.Limits
 	kn     kaname.Registrar
+	server *enroll.Server
 }
 
 func scheme(t *testing.T) *runtime.Scheme {
@@ -159,6 +162,7 @@ func (e *env) start() {
 		Audience: audience, WorkloadName: func(id string) string { return "zot-" + id },
 		Limits: e.limits, Now: func() time.Time { return e.now }, Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
+	e.server = s
 	e.srv = httptest.NewServer(s.Handler())
 	e.t.Cleanup(e.srv.Close)
 }
@@ -581,6 +585,37 @@ func TestEnroll_CompensationIsRetriedUntilIAMAnswers(t *testing.T) {
 		t.Fatalf("got %d", code)
 	}
 	e.eventuallyGone("registry_repository:abc123/team/app")
+}
+
+// Остановка короче срока компенсации: Drain по своему сроку обрывает идущую
+// компенсацию, и её исход «abandoned» сосчитан и записан до возврата Drain,
+// а не потерян вместе с процессом; после возврата компенсаций не идёт.
+func TestEnroll_StopAbandonsARunningCompensationWithItsAccount(t *testing.T) {
+	e := newEnv(t, nil, defaultLimits())
+	f := &flaky{inner: e.kn, failures: 1 << 30}
+	f.before = func() {
+		if err := e.closeRegistration(); err != nil {
+			t.Error(err)
+		}
+	}
+	e.kn = f
+	abandoned := func() float64 {
+		m := &dto.Metric{}
+		if err := metrics.EnrollmentCompensations.WithLabelValues("abandoned").Write(m); err != nil {
+			t.Fatal(err)
+		}
+		return m.GetCounter().GetValue()
+	}
+	before := abandoned()
+	if code, _ := e.post("tok-zot", "abc123", "team/app", "service_account:sva1"); code != http.StatusGone {
+		t.Fatalf("got %d", code)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	_ = e.server.Drain(ctx)
+	if got := abandoned() - before; got != 1 {
+		t.Fatalf("abandoned compensations counted by the end of Drain: %v, want 1", got)
+	}
 }
 
 // Опись под конкурирующими писателями: три случая заказа ревью.
