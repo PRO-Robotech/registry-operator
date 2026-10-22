@@ -18,7 +18,8 @@ spec:
   from:
     - group: gateway.networking.k8s.io
       kind: HTTPRoute
-      namespace: {{ .Values.instance.login | toJson }}
+      namespace: {{ .Values.site.edge.routeNamespace | toJson }}
   to:
     - group: ""
       kind: Service
+      name: {{ include "ri.base" . | toJson }}

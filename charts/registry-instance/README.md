@@ -70,6 +70,7 @@ Argo CD.
 | `--listen=:8080` | слушатель запросов клиентов (через прокси Envoy Gateway) |
 | `--health-listen=:8081` | слушатель проб и метрик: `GET /readyz`, `GET /healthz`, `GET /metrics`; в Service не выходит |
 | `--upstream=http://127.0.0.1:5000` | zot |
+| `--upstream-ready-path=/readyz` | путь готовности zot (есть в zot `v2.1.20`), который спрашивает `/readyz` прокси |
 | `--registry-id=<id>` | цель проверки: `registry_registry:<id>` и `registry_repository:<id>/<repo>` |
 | `--public=<true\|false>` | `Registry.spec.public`: pull без токена; прочее — только с токеном. Единственный механизм публичности: кортежей с подстановочным субъектом никто не пишет |
 | `--jwks-url=<https://…>` | набор ключей kaname |
