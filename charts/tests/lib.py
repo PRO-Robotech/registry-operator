@@ -397,9 +397,12 @@ def cmd_probe_platform(render, mode):
                 "roles and seed name no wildcard or system-class subject: public pull is the proxy flag only")
         roles = {r["id"]: r for r in m.get("roles", [])}
         p.check(sorted(roles) == ["registry.admin", "registry.puller", "registry.pusher"], f"roles puller, pusher, admin, got {sorted(roles)}")
+        # Класс create на регистри kaname ролью модуля не выдаёт (ни одно действие каталога
+        # прав его не спрашивает, суд ролей @93ad1b88 отказывает): заведение репозитория в
+        # регистри iam-proxy судит глаголом v_update на регистри.
         want = {"registry.puller": (["get"], ["get", "list"]),
-                "registry.pusher": (["get", "create"], ["get", "list", "update"]),
-                "registry.admin": (["get", "list", "create", "update", "delete"], ["get", "list", "update", "delete"])}
+                "registry.pusher": (["get", "update"], ["get", "list", "update"]),
+                "registry.admin": (["get", "list", "update", "delete"], ["get", "list", "update", "delete"])}
         for rid, (reg, repo) in want.items():
             role = roles.get(rid, {})
             rules = role.get("rules", [])

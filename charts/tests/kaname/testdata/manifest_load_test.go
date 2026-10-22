@@ -191,9 +191,9 @@ func TestDeliveredRegistryManifestPassesEveryKanameStage(t *testing.T) {
 		t.Fatalf("стадии суда ролей не исполнялись: правила %v, поимённая форма %v", rep.RulesJudged, rep.NamedJudged)
 	}
 	// Три роли по два правила (верхнее и вложенное); пар (ресурс, класс):
-	// на регистри 1 + 2 + 5, на репозиториях 2 + 3 + 4.
-	if rep.Rules.RolesRead != 3 || rep.Rules.RulesRead != 6 || rep.Rules.PairsJudged != 17 {
-		t.Fatalf("суд ролей осмотрел ролей %d, правил %d, пар %d; ожидалось 3, 6, 17",
+	// на регистри 1 + 2 + 4, на репозиториях 2 + 3 + 4.
+	if rep.Rules.RolesRead != 3 || rep.Rules.RulesRead != 6 || rep.Rules.PairsJudged != 16 {
+		t.Fatalf("суд ролей осмотрел ролей %d, правил %d, пар %d; ожидалось 3, 6, 16",
 			rep.Rules.RolesRead, rep.Rules.RulesRead, rep.Rules.PairsJudged)
 	}
 
