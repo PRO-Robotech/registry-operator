@@ -1,0 +1,5 @@
+# Близнец: базовая площадка. Меняется один факт: адрес Check kaname — внутренний листенер :9091.
+# expect: at '/site/kaname/url'
+site:
+  kaname:
+    url: https://kaname.example.test:9091

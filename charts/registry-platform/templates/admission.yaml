@@ -1,0 +1,267 @@
+{{- if .Values.admission.enabled }}
+{{- $ad := .Values.admission }}
+{{- /* Маршрут заказа V3 пускает только в admission.routeNamespace, а ReferenceGrant экземпляра
+открывает Service zot-<id> только маршрутам site.edge.routeNamespace: разойдись они — маршрут
+либо не пройдёт допуск, либо не разрешится. */}}
+{{- $siteRoutes := dig "edge" "routeNamespace" "" (.Values.site | default dict) }}
+{{- if ne $siteRoutes $ad.routeNamespace }}
+{{- fail (printf "site.edge.routeNamespace %q must equal admission.routeNamespace %q: the instance grant admits routes of one namespace only" $siteRoutes $ad.routeNamespace) }}
+{{- end }}
+{{- $au := $ad.authors }}
+{{- $b := .Values.addon.backend }}
+{{- $g := .Values.sharedRoutes.gateway }}
+{{- $params := printf "%s-admission" .Release.Name }}
+{{- $versions := list }}
+{{- range .Values.instanceChart.pins }}{{ $versions = append $versions .version }}{{ end }}
+{{- $tenant := $ad.tenantNamespaceLabels | toJson }}
+{{- $common := list (dict "name" "isOp" "expression" "request.userInfo.username == params.data.registryOperator") (dict "name" "isPlatform" "expression" "request.userInfo.username in params.data.platformUsers.split(',') || request.userInfo.groups.exists(g, g in params.data.platformGroups.split(','))") }}
+---
+# ПОКА БЕЗ (выключено по умолчанию): параметры политик допуска регистри. Те же проверки
+# registry-operator исполняет сам перед записью; политики закрывают прочих писателей.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $params | toJson }}
+  namespace: {{ $ad.paramsNamespace | toJson }}
+  labels:
+    {{- include "rp.labels" . | nindent 4 }}
+data:
+  registryOperator: {{ $au.registryOperator | toJson }}
+  addonsOperator: {{ $au.addonsOperator | toJson }}
+  argoController: {{ $au.argoController | toJson }}
+  replicaSetController: {{ $au.replicaSetController | toJson }}
+  namespaceController: {{ $au.namespaceController | toJson }}
+  garbageCollector: {{ $au.garbageCollector | toJson }}
+  platformUsers: {{ join "," $au.platformUsers | toJson }}
+  platformGroups: {{ join "," $au.platformGroups | toJson }}
+  allowedRoles: {{ join "," $ad.allowedRoles | toJson }}
+  vaultConfig: {{ $ad.vault.config | toJson }}
+  s3Config: {{ $ad.vault.s3Config | toJson }}
+  authMount: {{ $ad.vault.authMount | toJson }}
+  secretsPrefix: {{ $ad.vault.secretsPrefix | toJson }}
+  routeNamespace: {{ $ad.routeNamespace | toJson }}
+  routeHost: {{ $ad.routeHost | toJson }}
+  gatewayName: {{ $g.name | toJson }}
+  gatewayNamespace: {{ $g.namespace | toJson }}
+  gatewaySection: {{ $g.sectionName | toJson }}
+  argocdNamespace: {{ $b.namespace | toJson }}
+  targetCluster: {{ .Values.addon.targetCluster | toJson }}
+  projectMode: {{ $b.projectMode | toJson }}
+  sharedProject: {{ $b.project | toJson }}
+  projectPrefix: {{ $b.projectPrefix | toJson }}
+  repoURL: {{ .Values.instanceChart.repoURL | toJson }}
+  chart: {{ .Values.instanceChart.name | toJson }}
+  allowedVersions: {{ join "," $versions | toJson }}
+  pluginName: {{ .Values.addon.pluginName | toJson }}
+  addonName: {{ .Values.addonName | toJson }}
+  orderVariables: {{ include "rp.orderVariables" . | fromJsonArray | join "," | toJson }}
+  allowedSyncOptions: {{ join "," $b.syncPolicy.syncOptions | toJson }}
+  platformPhase: {{ .Values.addonPhase.addonName | toJson }}
+{{- $policies := list }}
+
+{{- /* V1: учётка и выдача kaname заказа — только registry-operator; форма выдачи. Выдача судится
+по СОДЕРЖИМОМУ, а не только по имени zot-* и не только в namespace арендатора: выдача системному
+классу или подстановочному субъекту с ролью модуля registry либо на объект registry.* под любым
+именем и в любом namespace дала бы pull приватного регистри мимо флага --public iam-proxy. */}}
+{{- $v1o := "(request.operation == 'DELETE' ? oldObject : object)" }}
+{{- $v1reg := printf "request.resource.resource == 'accessbindings' && (%s.spec.?roleRef.?name.orValue('').startsWith('registry.') || %s.spec.?target.?resources.orValue([]).exists(r, r.type.startsWith('registry.')))" $v1o $v1o }}
+{{- $policies = append $policies (dict "id" "v1" "name" "registry-iam"
+  "rules" (list (dict "apiGroups" (list "iam.kaname.in-cloud.io") "resources" (list "serviceaccounts" "accessbindings") "operations" (list "CREATE" "UPDATE" "DELETE")))
+  "match" (printf "%s.metadata.name.startsWith('zot-') || (%s)" $v1o $v1reg)
+  "vars" (list
+    (dict "name" "o" "expression" $v1o)
+    (dict "name" "zot" "expression" "variables.o.metadata.name.startsWith('zot-')")
+    (dict "name" "reg" "expression" $v1reg)
+    (dict "name" "id" "expression" "variables.o.metadata.?labels[?'registry.in-cloud.io/id'].orValue('')"))
+  "checks" (list
+    (dict "expression" (printf "!variables.zot || variables.isOp || variables.isPlatform || (request.operation == 'UPDATE' && %s && %s)" (include "rp.same" "spec") (include "rp.same" "metadata.labels")) "message" "zot-* IAM objects are written only by registry-operator; other writers may change only metadata outside labels")
+    (dict "expression" "request.operation == 'DELETE' || !variables.isOp || (variables.id != '' && variables.o.metadata.name.startsWith('zot-' + variables.id + '-') && variables.o.metadata.?labels[?'registry.in-cloud.io/namespace'].orValue('') == request.namespace)" "message" "a zot-<id>-* IAM object carries its id and namespace labels")
+    (dict "expression" "request.resource.resource != 'accessbindings' || request.operation == 'DELETE' || !variables.isOp || (object.spec.roleRef.name in params.data.allowedRoles.split(',') && size(object.spec.target.resources) == 1 && object.spec.target.resources[0].type == 'registry.registries' && object.spec.target.resources[0].id == variables.id && object.spec.subjects.all(s, has(s.serviceAccountRef) && s.serviceAccountRef.name.startsWith('zot-' + variables.id + '-')))" "message" "a registry binding grants an allowed role on its own registry to its own robots only")
+    (dict "expression" "request.resource.resource != 'accessbindings' || request.operation == 'DELETE' || !(variables.zot || variables.reg) || object.spec.subjects.all(s, !has(s.systemClass) && s.?user.?id.orValue('') != '*' && s.?group.?id.orValue('') != '*' && s.?serviceAccountRef.?name.orValue('') != '*')" "message" "a registry binding names no system class and no wildcard subject, by any writer, under any name and in any namespace: anonymous pull is only the --public flag of iam-proxy"))) }}
+
+{{- /* V2: статус заказа и резерва — только registry-operator, единственный их писатель. */}}
+{{- $policies = append $policies (dict "id" "v2" "name" "registry-status"
+  "rules" (list (dict "apiGroups" (list "registry.in-cloud.io") "resources" (list "registries/status" "registryidreservations/status") "operations" (list "UPDATE")))
+  "checks" (list
+    (dict "expression" "variables.isPlatform || variables.isOp" "message" "registry and reservation status are written only by registry-operator"))) }}
+
+{{- /* V3: маршрут заказа — только registry-operator и только своей формы. Маршрут судится и по
+ссылке на Service zot-*, а не только по имени: ReferenceGrant экземпляра открывает zot-<id> любому
+HTTPRoute namespace края, и маршрут под другим именем обошёл бы допуск. */}}
+{{- $policies = append $policies (dict "id" "v3" "name" "registry-route"
+  "rules" (list (dict "apiGroups" (list "gateway.networking.k8s.io") "resources" (list "httproutes") "operations" (list "CREATE" "UPDATE" "DELETE")))
+  "match" "(request.operation == 'DELETE' ? oldObject : object).metadata.name.startsWith('zot-') || (request.operation == 'DELETE' ? oldObject : object).spec.?rules.orValue([]).exists(r, r.?backendRefs.orValue([]).exists(b, b.name.startsWith('zot-')))"
+  "vars" (list (dict "name" "id" "expression" "(request.operation == 'DELETE' ? oldObject : object).metadata.?labels[?'registry.in-cloud.io/id'].orValue('')"))
+  "checks" (list
+    (dict "expression" (printf "variables.isOp || variables.isPlatform || (request.operation == 'UPDATE' && %s && %s)" (include "rp.same" "spec") (include "rp.same" "metadata.labels")) "message" "routes named zot-* or to a Service zot-* are written only by registry-operator")
+    (dict "expression" "request.operation == 'DELETE' || !variables.isOp || (request.namespace == params.data.routeNamespace && variables.id != '' && object.metadata.name == 'zot-' + variables.id && object.spec.?hostnames.orValue([]) == [params.data.routeHost] && size(object.spec.parentRefs) == 1 && object.spec.parentRefs[0].name == params.data.gatewayName && object.spec.parentRefs[0].?namespace.orValue(request.namespace) == params.data.gatewayNamespace && object.spec.parentRefs[0].?sectionName.orValue('') == params.data.gatewaySection && size(object.spec.rules) == 1 && !has(object.spec.rules[0].filters) && size(object.spec.rules[0].matches) == 1 && object.spec.rules[0].matches[0].path.type == 'PathPrefix' && object.spec.rules[0].matches[0].path.value == '/v2/' + variables.id + '/' && size(object.spec.rules[0].backendRefs) == 1 && object.spec.rules[0].backendRefs[0].?kind.orValue('Service') == 'Service' && object.spec.rules[0].backendRefs[0].?group.orValue('') == '' && object.spec.rules[0].backendRefs[0].name == 'zot-' + variables.id && object.spec.rules[0].backendRefs[0].?namespace.orValue(request.namespace) == object.metadata.?labels[?'registry.in-cloud.io/namespace'].orValue('') && object.spec.rules[0].backendRefs[0].?port.orValue(0) == 8080)" "message" "a registry route is /v2/<id>/ on the registry host and gateway, to Service zot-<id>:8080 of its tenant"))) }}
+
+{{- /* V4: поды с SA zot-* создаёт только replicaset-controller. */}}
+{{- $policies = append $policies (dict "id" "v4" "name" "registry-zot-pods" "nsSelector" $tenant
+  "rules" (list (dict "apiGroups" (list "") "resources" (list "pods") "operations" (list "CREATE")))
+  "match" "object.spec.?serviceAccountName.orValue('').startsWith('zot-')"
+  "checks" (list
+    (dict "expression" "variables.isPlatform || request.userInfo.username == params.data.replicaSetController" "message" "pods of zot-* service accounts are created only by their Deployment"))) }}
+
+{{- /* V5: метки арендатора на namespace — только платформа. */}}
+{{- $nsChecks := list }}
+{{- range $k := keys $ad.tenantNamespaceLabels | sortAlpha }}
+{{- $nsChecks = append $nsChecks (printf "object.metadata.?labels[?%s].orValue('') == (request.operation == 'CREATE' ? '' : oldObject.metadata.?labels[?%s].orValue(''))" (squote $k) (squote $k)) }}
+{{- end }}
+{{- $policies = append $policies (dict "id" "v5" "name" "registry-tenant-namespaces"
+  "rules" (list (dict "apiGroups" (list "") "resources" (list "namespaces") "operations" (list "CREATE" "UPDATE")))
+  "checks" (list
+    (dict "expression" (printf "variables.isPlatform || (%s)" (join " && " $nsChecks)) "message" "tenant namespace labels are set only by the platform"))) }}
+
+{{- /* V6: резерв id — создаёт registry-operator, снимает только платформа. */}}
+{{- $policies = append $policies (dict "id" "v6" "name" "registry-reservations"
+  "rules" (list (dict "apiGroups" (list "registry.in-cloud.io") "resources" (list "registryidreservations") "operations" (list "CREATE" "UPDATE" "DELETE")))
+  "checks" (list
+    (dict "expression" (printf "variables.isPlatform || (request.operation == 'CREATE' && variables.isOp) || (request.operation == 'UPDATE' && (variables.isOp || (%s && %s)))" (include "rp.same" "spec") (include "rp.same" "metadata.labels")) "message" "reservations are created by registry-operator and removed only by the platform"))) }}
+
+{{- /* V7: аннотации registry.in-cloud.io/* на заказе — только платформа и оператор. */}}
+{{- $policies = append $policies (dict "id" "v7" "name" "registry-annotations"
+  "rules" (list (dict "apiGroups" (list "registry.in-cloud.io") "resources" (list "registries") "operations" (list "CREATE" "UPDATE")))
+  "vars" (list
+    (dict "name" "na" "expression" "object.metadata.?annotations.orValue({})")
+    (dict "name" "oa" "expression" "request.operation == 'CREATE' ? {} : oldObject.metadata.?annotations.orValue({})"))
+  "checks" (list
+    (dict "expression" "variables.isPlatform || variables.isOp || (variables.na.all(k, !k.startsWith('registry.in-cloud.io/') || (k in variables.oa && variables.oa[k] == variables.na[k])) && variables.oa.all(k, !k.startsWith('registry.in-cloud.io/') || k in variables.na))" "message" "registry.in-cloud.io/ annotations of a Registry are set only by the platform"))) }}
+
+{{- /* V8: рабочую нагрузку zot-* (и разрешение маршруту к её Service) в namespace арендатора пишет только Argo CD. */}}
+{{- $saSame := printf "%s && %s && %s" (include "rp.same" "automountServiceAccountToken") (include "rp.same" "secrets") (include "rp.same" "imagePullSecrets") }}
+{{- $policies = append $policies (dict "id" "v8" "name" "registry-zot-workload" "nsSelector" $tenant
+  "rules" (list (dict "apiGroups" (list "") "resources" (list "serviceaccounts" "services") "operations" (list "CREATE" "UPDATE" "DELETE")) (dict "apiGroups" (list "apps") "resources" (list "deployments") "operations" (list "CREATE" "UPDATE" "DELETE")) (dict "apiGroups" (list "cilium.io") "resources" (list "ciliumnetworkpolicies") "operations" (list "CREATE" "UPDATE" "DELETE")) (dict "apiGroups" (list "gateway.networking.k8s.io") "resources" (list "referencegrants") "operations" (list "CREATE" "UPDATE" "DELETE")))
+  "match" "(request.operation == 'DELETE' ? oldObject : object).metadata.name.startsWith('zot-')"
+  "vars" (list (dict "name" "isArgo" "expression" "request.userInfo.username == params.data.argoController"))
+  "checks" (list
+    (dict "expression" "request.operation != 'CREATE' || variables.isArgo || variables.isPlatform" "message" "zot-* workload objects are created only by Argo CD")
+    (dict "expression" (printf "request.operation != 'UPDATE' || variables.isArgo || variables.isPlatform || ((request.resource.resource == 'serviceaccounts' ? (%s) : %s) && %s && %s)" $saSame (include "rp.same" "spec") (include "rp.same" "metadata.labels") (include "rp.same" "metadata.ownerReferences")) "message" "zot-* workload objects are changed only by Argo CD; other writers may change only metadata outside labels")
+    (dict "expression" "request.operation != 'DELETE' || variables.isArgo || variables.isPlatform || request.userInfo.username in [params.data.namespaceController, params.data.garbageCollector]" "message" "zot-* workload objects are deleted only by Argo CD or with their namespace"))) }}
+
+{{- /* V9: отметку отслеживания Argo CD заказов ставит только Argo CD. */}}
+{{- $policies = append $policies (dict "id" "v9" "name" "registry-tracking" "nsSelector" $tenant
+  "rules" (list (dict "apiGroups" (list "*") "resources" (list "*") "operations" (list "CREATE" "UPDATE")))
+  "vars" (list
+    (dict "name" "nt" "expression" "object.metadata.?annotations[?'argocd.argoproj.io/tracking-id'].orValue('')")
+    (dict "name" "ot" "expression" "request.operation == 'CREATE' ? '' : oldObject.metadata.?annotations[?'argocd.argoproj.io/tracking-id'].orValue('')"))
+  "checks" (list
+    (dict "expression" "variables.nt == variables.ot || (!variables.nt.startsWith('reg-') && !variables.ot.startsWith('reg-')) || request.userInfo.username == params.data.argoController || variables.isPlatform" "message" "the Argo CD tracking mark of a registry Application is set only by Argo CD"))) }}
+
+{{- /* V10: Addon заказа — только registry-operator и только закреплённой формы. */}}
+{{- $policies = append $policies (dict "id" "v10" "name" "registry-addons"
+  "rules" (list (dict "apiGroups" (list "addons.in-cloud.io") "resources" (list "addons") "operations" (list "CREATE" "UPDATE" "DELETE")))
+  "vars" (list
+    (dict "name" "o" "expression" "request.operation == 'DELETE' ? oldObject : object")
+    (dict "name" "reg" "expression" "variables.o.metadata.name.startsWith('reg-')")
+    (dict "name" "id" "expression" "variables.o.metadata.?labels[?'registry.in-cloud.io/id'].orValue('')")
+    (dict "name" "login" "expression" "variables.o.metadata.?labels[?'registry.in-cloud.io/namespace'].orValue('')")
+    (dict "name" "vars" "expression" "request.operation == 'DELETE' ? {} : object.spec.?variables.orValue({})"))
+  "checks" (list
+    (dict "expression" (printf "variables.isPlatform || (variables.reg ? (variables.isOp || (request.operation == 'UPDATE' && %s)) : !variables.isOp)" (include "rp.same" "spec")) "message" "reg-* Addons are written only by registry-operator, and registry-operator writes only reg-* Addons")
+    (dict "expression" "request.operation == 'DELETE' || !variables.isOp || (variables.id != '' && variables.login != '' && object.metadata.name == 'reg-' + variables.id && object.spec.targetCluster == params.data.targetCluster && object.spec.targetNamespace == variables.login && object.spec.backend.type == 'argocd' && object.spec.backend.namespace == params.data.argocdNamespace && object.spec.backend.?finalizer.orValue(false) && object.spec.backend.?project.orValue('') == (params.data.projectMode == 'tenant' ? params.data.projectPrefix + variables.login : params.data.sharedProject))" "message" "a registry Addon deploys into its tenant namespace through the platform Argo CD project")
+    (dict "expression" "request.operation == 'DELETE' || !variables.isOp || (object.spec.repoURL == params.data.repoURL && object.spec.?chart.orValue('') == params.data.chart && object.spec.version in params.data.allowedVersions.split(',') && object.spec.?pluginName.orValue('') == params.data.pluginName && !has(object.spec.path) && size(object.spec.?valuesSources.orValue([])) == 0 && size(object.spec.?initDependencies.orValue([])) == 0)" "message" "a registry Addon uses a pinned version of the registry-instance chart and reads no cluster objects")
+    (dict "expression" "request.operation == 'DELETE' || !variables.isOp || (params.data.orderVariables.split(',').all(k, k in variables.vars) && variables.vars.all(k, k in params.data.orderVariables.split(',') && !variables.vars[k].contains('{{') && !variables.vars[k].contains('<path:')) && variables.vars['id'] == variables.id && variables.vars['login'] == variables.login && variables.vars['vaultRole'] == 'zot-' + variables.id)" "message" "registry Addon variables are exactly the order variables of its own order")
+    (dict "expression" "request.operation == 'DELETE' || !variables.isOp || (size(object.spec.?valuesSelectors.orValue([])) == 2 && object.spec.valuesSelectors.all(s, s.matchLabels.size() == 2 && s.matchLabels[?'addons.in-cloud.io/addon'].orValue('') == params.data.addonName && s.matchLabels[?'addons.in-cloud.io/values'].orValue('') in ['order', 'site']))" "message" "a registry Addon selects only the platform order and site layers")
+    (dict "expression" "request.operation == 'DELETE' || !variables.isOp || (!has(object.spec.backend.syncPolicy) || (!has(object.spec.backend.syncPolicy.managedNamespaceMetadata) && object.spec.backend.syncPolicy.?syncOptions.orValue([]).all(x, x in params.data.allowedSyncOptions.split(',')) && object.spec.backend.syncPolicy.?retry.?limit.orValue(0) <= 10)) && size(object.spec.backend.?ignoreDifferences.orValue([])) == 0" "message" "a registry Addon uses only the allowed sync options and ignores no differences"))) }}
+
+{{- /* V11: слои AddonValue чарта экземпляра — только платформа, без исполняемых подстановок. */}}
+{{- $policies = append $policies (dict "id" "v11" "name" "registry-addonvalues"
+  "rules" (list (dict "apiGroups" (list "addons.in-cloud.io") "resources" (list "addonvalues") "operations" (list "CREATE" "UPDATE" "DELETE")))
+  "vars" (list (dict "name" "layer" "expression" "(request.operation == 'DELETE' ? oldObject : object).metadata.?labels[?'addons.in-cloud.io/addon'].orValue('')"))
+  "checks" (list
+    (dict "expression" "variables.layer != params.data.addonName || variables.isPlatform" "message" "registry-instance value layers are written only by the platform")
+    (dict "expression" "request.operation == 'DELETE' || variables.layer != params.data.addonName || (!object.spec.values.contains('<path:') && !object.spec.values.contains('argocdPlugins'))" "message" "registry-instance value layers carry no secret-plugin substitutions"))) }}
+
+{{- /* V12: фазы Addon заказов не заводятся; фаза площадки — только платформа. */}}
+{{- $policies = append $policies (dict "id" "v12" "name" "registry-addonphases"
+  "rules" (list (dict "apiGroups" (list "addons.in-cloud.io") "resources" (list "addonphases") "operations" (list "CREATE" "UPDATE")))
+  "checks" (list
+    (dict "expression" "!object.metadata.name.startsWith('reg-')" "message" "registry Addons have no phase: their order is driven by registry-operator")
+    (dict "expression" "object.metadata.name != params.data.platformPhase || variables.isPlatform" "message" "the registry platform phase is written only by the platform"))) }}
+
+{{- /* V13: проекты Argo CD регистри — только платформа и только узкой формы. */}}
+{{- $policies = append $policies (dict "id" "v13" "name" "registry-appprojects"
+  "rules" (list (dict "apiGroups" (list "argoproj.io") "resources" (list "appprojects") "operations" (list "CREATE" "UPDATE" "DELETE")))
+  "match" (printf "(request.operation == 'DELETE' ? oldObject : object).metadata.name.startsWith(%s)" (squote $b.projectPrefix))
+  "checks" (list
+    (dict "expression" (printf "variables.isPlatform || (request.operation == 'UPDATE' && %s)" (include "rp.same" "spec")) "message" "registry Argo CD projects are written only by the platform")
+    (dict "expression" "request.operation == 'DELETE' || (!has(object.spec.sourceNamespaces) && size(object.spec.?clusterResourceWhitelist.orValue([])) == 0 && object.spec.?sourceRepos.orValue([]) == [params.data.repoURL] && size(object.spec.?destinations.orValue([])) == 1 && object.spec.destinations[0].?server.orValue('') == 'https://kubernetes.default.svc' && object.spec.destinations[0].?namespace.orValue('') == object.metadata.name.substring(size(params.data.projectPrefix)) && object.spec.?namespaceResourceWhitelist.orValue([]).all(r, (r.group == '' && r.kind in ['ServiceAccount', 'Service']) || (r.group == 'apps' && r.kind == 'Deployment') || (r.group == 'cilium.io' && r.kind == 'CiliumNetworkPolicy') || (r.group == 'gateway.networking.k8s.io' && r.kind == 'ReferenceGrant')))" "message" "a registry project deploys only the zot workload from the registry-instance chart into its own tenant namespace"))) }}
+
+{{- /* V14: бакет и роль Vault заказа — только registry-operator и только фиксированной формы. */}}
+{{- $policies = append $policies (dict "id" "v14" "name" "registry-vault-claims" "nsSelector" $tenant
+  "rules" (list (dict "apiGroups" (list "vault.in-cloud.io") "resources" (list "vaultclaims" "s3bucketclaims") "operations" (list "CREATE" "UPDATE" "DELETE")))
+  "match" "(request.operation == 'DELETE' ? oldObject : object).metadata.name.startsWith('zot-')"
+  "checks" (list
+    (dict "expression" (printf "variables.isOp || variables.isPlatform || (request.operation == 'UPDATE' && %s && %s)" (include "rp.same" "spec") (include "rp.same" "metadata.labels")) "message" "zot-* Vault claims are written only by registry-operator; other writers may change only metadata outside labels")
+    (dict "expression" "request.resource.resource != 'vaultclaims' || request.operation == 'DELETE' || !variables.isOp || (object.spec.vaultConfigRef.name == params.data.vaultConfig && object.spec.secretsPrefix == params.data.secretsPrefix && object.spec.auth.mountPath == params.data.authMount && has(object.spec.auth.manageConfig) && !object.spec.auth.manageConfig && !object.spec.auth.?autoCreate.orValue(false) && object.spec.auth.?rolePruning.orValue('') == 'Owned' && !has(object.spec.transit) && !has(object.spec.clusterRef) && size(object.spec.roles) == 1 && object.spec.roles[0].name == object.metadata.name && object.spec.roles[0].boundServiceAccounts.?names.orValue([]) == [object.metadata.name] && object.spec.roles[0].boundServiceAccounts.namespace == request.namespace && object.spec.roles[0].?policies.orValue([]).all(p, object.spec.?policies.orValue([]).exists(q, q.name == p)) && object.spec.?policies.orValue([]).all(q, q.name.startsWith(object.metadata.name + '-') && !has(q.rules) && q.?identityPaths.orValue([]).all(ip, ip.path.endsWith('/namespaces/{serviceAccountNamespace}/apps/docker-registry/{serviceAccountName}') && ip.capabilities.all(c, c == 'read'))))" "message" "a registry Vault claim is a guest on the platform mount with one role for its own service account, reading only its own leaf")
+    (dict "expression" "request.resource.resource != 's3bucketclaims' || request.operation == 'DELETE' || !variables.isOp || (object.spec.vaultConfigRef.name == params.data.s3Config && object.spec.customerLogin == request.namespace && object.spec.vault.secretsPrefix == params.data.secretsPrefix && object.spec.vault.destinationPath == 'namespaces/' + request.namespace + '/apps/docker-registry/' + object.metadata.name && !object.spec.?bucket.?public.orValue(false) && !has(object.spec.bucket.name))" "message" "a registry bucket is private, new and writes its keys only to its own leaf"))) }}
+
+{{- /* V15: Application заказов — создаёт и снимает только addons-operator. */}}
+{{- $policies = append $policies (dict "id" "v15" "name" "registry-applications" "nsSelector" (dict "kubernetes.io/metadata.name" $b.namespace | toJson)
+  "rules" (list (dict "apiGroups" (list "argoproj.io") "resources" (list "applications") "operations" (list "CREATE" "UPDATE" "DELETE")))
+  "match" "(request.operation == 'DELETE' ? oldObject : object).metadata.name.startsWith('reg-')"
+  "checks" (list
+    (dict "expression" "request.operation == 'UPDATE' || variables.isPlatform || request.userInfo.username in [params.data.addonsOperator, params.data.garbageCollector]" "message" "registry Applications are created and deleted only by addons-operator")
+    (dict "expression" (printf "request.operation != 'UPDATE' || variables.isPlatform || request.userInfo.username == params.data.addonsOperator || (%s && %s && (!variables.isOp || (%s && %s)))" (include "rp.same" "spec") (include "rp.same" "metadata.ownerReferences") (include "rp.same" "metadata.labels") (include "rp.same" "metadata.annotations")) "message" "registry Applications are changed only by addons-operator; others may not change their spec or owners"))) }}
+
+{{- range $p := $policies }}
+---
+# ПОКА БЕЗ (выключено по умолчанию): политика {{ upper $p.id }}.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ printf "%s-%s" $p.id $p.name | toJson }}
+  labels:
+    {{- include "rp.labels" $ | nindent 4 }}
+    registry.in-cloud.io/policy: {{ $p.id | toJson }}
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: v1
+    kind: ConfigMap
+  matchConstraints:
+    {{- with $p.nsSelector }}
+    namespaceSelector:
+      matchLabels: {{ . }}
+    {{- end }}
+    resourceRules:
+      {{- range $r := $p.rules }}
+      - apiGroups: {{ $r.apiGroups | toJson }}
+        apiVersions: ["*"]
+        resources: {{ $r.resources | toJson }}
+        operations: {{ $r.operations | toJson }}
+      {{- end }}
+  {{- with $p.match }}
+  matchConditions:
+    - name: subject
+      expression: {{ . | toJson }}
+  {{- end }}
+  variables:
+    {{- range $v := concat $common ($p.vars | default list) }}
+    - name: {{ $v.name | toJson }}
+      expression: {{ $v.expression | toJson }}
+    {{- end }}
+  validations:
+    {{- range $c := $p.checks }}
+    - expression: {{ $c.expression | toJson }}
+      message: {{ $c.message | toJson }}
+      reason: Forbidden
+    {{- end }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ printf "%s-%s" $p.id $p.name | toJson }}
+  labels:
+    {{- include "rp.labels" $ | nindent 4 }}
+    registry.in-cloud.io/policy: {{ $p.id | toJson }}
+spec:
+  policyName: {{ printf "%s-%s" $p.id $p.name | toJson }}
+  validationActions: ["Deny"]
+  paramRef:
+    name: {{ $params | toJson }}
+    namespace: {{ $ad.paramsNamespace | toJson }}
+    parameterNotFoundAction: Deny
+{{- end }}
+{{- end }}

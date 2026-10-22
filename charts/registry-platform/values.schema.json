@@ -1,0 +1,769 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "registry-platform values",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "addonName",
+    "instanceChart",
+    "addon",
+    "site",
+    "kanameModule",
+    "sharedRoutes",
+    "gateway",
+    "addonPhase",
+    "admission",
+    "appProjects"
+  ],
+  "definitions": {
+    "dnsLabel": {
+      "type": "string",
+      "maxLength": 63,
+      "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"
+    },
+    "optDnsLabel": {
+      "type": "string",
+      "maxLength": 63,
+      "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)?$"
+    },
+    "dnsName": {
+      "type": "string",
+      "maxLength": 253,
+      "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]([a-z0-9-]{0,61}[a-z0-9])?$"
+    },
+    "dnsSubdomain": {
+      "type": "string",
+      "maxLength": 253,
+      "pattern": "^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$"
+    },
+    "labelKey": {
+      "type": "string",
+      "pattern": "^([a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?/)?[A-Za-z0-9]([A-Za-z0-9._-]{0,61}[A-Za-z0-9])?$"
+    },
+    "labelValue": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9]([A-Za-z0-9._-]{0,61}[A-Za-z0-9])?$"
+    },
+    "narrowingLabels": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 8,
+      "propertyNames": {
+        "$ref": "#/definitions/labelKey"
+      },
+      "additionalProperties": {
+        "$ref": "#/definitions/labelValue"
+      }
+    },
+    "port": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "serviceAccountUser": {
+      "type": "string",
+      "pattern": "^system:serviceaccount:[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?:[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$"
+    },
+    "optServiceAccountUser": {
+      "type": "string",
+      "pattern": "^(system:serviceaccount:[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?:[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?)?$"
+    },
+    "duration": {
+      "type": "string",
+      "pattern": "^[0-9]+(ms|s|m|h)$"
+    },
+    "backendRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "namespace",
+        "name",
+        "port"
+      ],
+      "properties": {
+        "namespace": {
+          "$ref": "#/definitions/dnsLabel"
+        },
+        "name": {
+          "$ref": "#/definitions/dnsLabel"
+        },
+        "port": {
+          "$ref": "#/definitions/port"
+        }
+      }
+    }
+  },
+  "properties": {
+    "global": {
+      "type": "object"
+    },
+    "addonName": {
+      "$ref": "#/definitions/dnsLabel"
+    },
+    "instanceChart": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repoURL",
+        "name",
+        "pins"
+      ],
+      "properties": {
+        "repoURL": {
+          "type": "string",
+          "maxLength": 512,
+          "pattern": "^oci://[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?(/[a-z0-9]([a-z0-9._-]*[a-z0-9])?)+$"
+        },
+        "name": {
+          "$ref": "#/definitions/dnsLabel"
+        },
+        "pins": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "version",
+              "digest"
+            ],
+            "properties": {
+              "version": {
+                "type": "string",
+                "maxLength": 64,
+                "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+([-+][0-9A-Za-z.-]+)?$"
+              },
+              "digest": {
+                "type": "string",
+                "pattern": "^sha256:[a-f0-9]{64}$"
+              }
+            }
+          }
+        }
+      }
+    },
+    "addon": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "targetCluster",
+        "pluginName",
+        "backend"
+      ],
+      "properties": {
+        "targetCluster": {
+          "$ref": "#/definitions/dnsSubdomain"
+        },
+        "pluginName": {
+          "type": "string",
+          "maxLength": 63,
+          "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)?$"
+        },
+        "backend": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "namespace",
+            "projectMode",
+            "project",
+            "projectPrefix",
+            "syncPolicy"
+          ],
+          "properties": {
+            "namespace": {
+              "$ref": "#/definitions/dnsLabel"
+            },
+            "projectMode": {
+              "enum": [
+                "shared",
+                "tenant"
+              ]
+            },
+            "project": {
+              "$ref": "#/definitions/optDnsLabel"
+            },
+            "projectPrefix": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{0,30}-$"
+            },
+            "syncPolicy": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "syncOptions",
+                "retry"
+              ],
+              "properties": {
+                "syncOptions": {
+                  "type": "array",
+                  "maxItems": 4,
+                  "uniqueItems": true,
+                  "items": {
+                    "enum": [
+                      "ServerSideApply=true",
+                      "FailOnSharedResource=true",
+                      "ApplyOutOfSyncOnly=true"
+                    ]
+                  }
+                },
+                "retry": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "limit",
+                    "backoff"
+                  ],
+                  "properties": {
+                    "limit": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 10
+                    },
+                    "backoff": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "duration",
+                        "factor",
+                        "maxDuration"
+                      ],
+                      "properties": {
+                        "duration": {
+                          "$ref": "#/definitions/duration"
+                        },
+                        "factor": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 10
+                        },
+                        "maxDuration": {
+                          "$ref": "#/definitions/duration"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "if": {
+            "properties": {
+              "projectMode": {
+                "const": "shared"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "project": {
+                "$ref": "#/definitions/dnsLabel"
+              }
+            }
+          }
+        }
+      }
+    },
+    "site": {
+      "description": "Site layer of registry-instance (its .site). Validated in depth by the registry-instance schema when the Addon renders; the probes render an instance with this layer.",
+      "allOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "caBundle",
+            "vault",
+            "kaname",
+            "registryOperator",
+            "iamProxy",
+            "images",
+            "edge",
+            "network",
+            "resources"
+          ],
+          "properties": {
+            "caBundle": {
+              "type": "object"
+            },
+            "vault": {
+              "type": "object"
+            },
+            "kaname": {
+              "type": "object"
+            },
+            "registryOperator": {
+              "type": "object"
+            },
+            "iamProxy": {
+              "type": "object"
+            },
+            "images": {
+              "type": "object"
+            },
+            "edge": {
+              "type": "object"
+            },
+            "network": {
+              "type": "object"
+            },
+            "resources": {
+              "type": "object"
+            }
+          }
+        }
+      ]
+    },
+    "kanameModule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "namespace",
+        "configMapName",
+        "systemAccount"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "namespace": {
+          "$ref": "#/definitions/optDnsLabel"
+        },
+        "configMapName": {
+          "$ref": "#/definitions/dnsLabel"
+        },
+        "systemAccount": {
+          "$ref": "#/definitions/optDnsLabel"
+        }
+      },
+      "if": {
+        "properties": {
+          "enabled": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "namespace": {
+            "$ref": "#/definitions/dnsLabel"
+          },
+          "systemAccount": {
+            "$ref": "#/definitions/dnsLabel"
+          }
+        }
+      }
+    },
+    "sharedRoutes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "namespace",
+        "gateway",
+        "host",
+        "apiRoot",
+        "token"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "namespace": {
+          "$ref": "#/definitions/optDnsLabel"
+        },
+        "gateway": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "namespace",
+            "sectionName"
+          ],
+          "properties": {
+            "name": {
+              "$ref": "#/definitions/optDnsLabel"
+            },
+            "namespace": {
+              "$ref": "#/definitions/optDnsLabel"
+            },
+            "sectionName": {
+              "$ref": "#/definitions/dnsLabel"
+            }
+          }
+        },
+        "host": {
+          "type": "string"
+        },
+        "apiRoot": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "backend"
+          ],
+          "properties": {
+            "backend": {
+              "type": "object"
+            }
+          }
+        },
+        "token": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "backend"
+          ],
+          "properties": {
+            "backend": {
+              "type": "object"
+            }
+          }
+        }
+      },
+      "if": {
+        "properties": {
+          "enabled": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "namespace": {
+            "$ref": "#/definitions/dnsLabel"
+          },
+          "host": {
+            "$ref": "#/definitions/dnsName"
+          },
+          "gateway": {
+            "properties": {
+              "name": {
+                "$ref": "#/definitions/dnsLabel"
+              },
+              "namespace": {
+                "$ref": "#/definitions/dnsLabel"
+              }
+            }
+          },
+          "apiRoot": {
+            "properties": {
+              "backend": {
+                "$ref": "#/definitions/backendRef"
+              }
+            }
+          },
+          "token": {
+            "properties": {
+              "backend": {
+                "$ref": "#/definitions/backendRef"
+              }
+            }
+          }
+        }
+      }
+    },
+    "gateway": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "name",
+        "namespace",
+        "gatewayClassName",
+        "sectionName",
+        "host",
+        "certificateSecretName",
+        "routeNamespaceLabels"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "gatewayClassName": {
+          "type": "string"
+        },
+        "sectionName": {
+          "$ref": "#/definitions/dnsLabel"
+        },
+        "host": {
+          "type": "string"
+        },
+        "certificateSecretName": {
+          "type": "string"
+        },
+        "routeNamespaceLabels": {
+          "type": "object"
+        }
+      },
+      "if": {
+        "properties": {
+          "enabled": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "name": {
+            "$ref": "#/definitions/dnsLabel"
+          },
+          "namespace": {
+            "$ref": "#/definitions/dnsLabel"
+          },
+          "gatewayClassName": {
+            "$ref": "#/definitions/dnsSubdomain"
+          },
+          "host": {
+            "$ref": "#/definitions/dnsName"
+          },
+          "certificateSecretName": {
+            "$ref": "#/definitions/dnsSubdomain"
+          },
+          "routeNamespaceLabels": {
+            "$ref": "#/definitions/narrowingLabels"
+          }
+        }
+      }
+    },
+    "addonPhase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "addonName",
+        "crdName",
+        "priority"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "addonName": {
+          "$ref": "#/definitions/dnsLabel"
+        },
+        "crdName": {
+          "$ref": "#/definitions/dnsSubdomain"
+        },
+        "priority": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        }
+      }
+    },
+    "admission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "paramsNamespace",
+        "tenantNamespaceLabels",
+        "authors",
+        "allowedRoles",
+        "vault",
+        "routeNamespace",
+        "routeHost"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "paramsNamespace": {
+          "$ref": "#/definitions/optDnsLabel"
+        },
+        "tenantNamespaceLabels": {
+          "$ref": "#/definitions/narrowingLabels"
+        },
+        "authors": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "registryOperator",
+            "addonsOperator",
+            "argoController",
+            "replicaSetController",
+            "namespaceController",
+            "garbageCollector",
+            "platformUsers",
+            "platformGroups"
+          ],
+          "properties": {
+            "registryOperator": {
+              "$ref": "#/definitions/optServiceAccountUser"
+            },
+            "addonsOperator": {
+              "$ref": "#/definitions/optServiceAccountUser"
+            },
+            "argoController": {
+              "$ref": "#/definitions/optServiceAccountUser"
+            },
+            "replicaSetController": {
+              "$ref": "#/definitions/optServiceAccountUser"
+            },
+            "namespaceController": {
+              "$ref": "#/definitions/optServiceAccountUser"
+            },
+            "garbageCollector": {
+              "$ref": "#/definitions/optServiceAccountUser"
+            },
+            "platformUsers": {
+              "type": "array",
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 253,
+                "pattern": "^[^,]+$"
+              }
+            },
+            "platformGroups": {
+              "type": "array",
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 253,
+                "pattern": "^[^,]+$"
+              }
+            }
+          }
+        },
+        "allowedRoles": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^registry\\.[a-z][a-z0-9._-]{0,63}$"
+          }
+        },
+        "vault": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "config",
+            "s3Config",
+            "authMount",
+            "secretsPrefix"
+          ],
+          "properties": {
+            "config": {
+              "type": "string",
+              "maxLength": 253,
+              "pattern": "^([a-z0-9]([a-z0-9/_.-]*[a-z0-9])?)?$"
+            },
+            "s3Config": {
+              "type": "string",
+              "maxLength": 253,
+              "pattern": "^([a-z0-9]([a-z0-9/_.-]*[a-z0-9])?)?$"
+            },
+            "authMount": {
+              "type": "string",
+              "maxLength": 253,
+              "pattern": "^([a-z0-9]([a-z0-9/_.-]*[a-z0-9])?)?$"
+            },
+            "secretsPrefix": {
+              "type": "string",
+              "maxLength": 253,
+              "pattern": "^([a-z0-9]([a-z0-9/_.-]*[a-z0-9])?)?$"
+            }
+          }
+        },
+        "routeNamespace": {
+          "$ref": "#/definitions/optDnsLabel"
+        },
+        "routeHost": {
+          "type": "string"
+        }
+      },
+      "if": {
+        "properties": {
+          "enabled": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "paramsNamespace": {
+            "$ref": "#/definitions/dnsLabel"
+          },
+          "routeNamespace": {
+            "$ref": "#/definitions/dnsLabel"
+          },
+          "routeHost": {
+            "$ref": "#/definitions/dnsName"
+          },
+          "authors": {
+            "properties": {
+              "registryOperator": {
+                "$ref": "#/definitions/serviceAccountUser"
+              },
+              "addonsOperator": {
+                "$ref": "#/definitions/serviceAccountUser"
+              },
+              "argoController": {
+                "$ref": "#/definitions/serviceAccountUser"
+              },
+              "replicaSetController": {
+                "$ref": "#/definitions/serviceAccountUser"
+              },
+              "namespaceController": {
+                "$ref": "#/definitions/serviceAccountUser"
+              },
+              "garbageCollector": {
+                "$ref": "#/definitions/serviceAccountUser"
+              }
+            }
+          },
+          "vault": {
+            "properties": {
+              "config": {
+                "minLength": 1
+              },
+              "s3Config": {
+                "minLength": 1
+              },
+              "authMount": {
+                "minLength": 1
+              },
+              "secretsPrefix": {
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "appProjects": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "tenants"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "tenants": {
+          "type": "array",
+          "maxItems": 1024,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/definitions/dnsLabel"
+          }
+        }
+      }
+    }
+  }
+}

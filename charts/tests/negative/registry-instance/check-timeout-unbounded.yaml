@@ -1,0 +1,6 @@
+# Близнец: базовая площадка. Меняется один факт: срок Check без предела — iam-proxy
+# отказался бы стартовать (check-timeout в (0, 30s]).
+# expect: at '/site/iamProxy/checkTimeout'
+site:
+  iamProxy:
+    checkTimeout: 90s

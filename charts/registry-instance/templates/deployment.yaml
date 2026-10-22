@@ -1,0 +1,193 @@
+{{- $base := include "ri.base" . }}
+{{- $caPath := include "ri.caPath" . }}
+{{- $tokenDir := include "ri.registrationTokenDir" . }}
+---
+# zot слушает только 127.0.0.1:5000 и хранит данные только в S3; снаружи пода
+# доступен лишь iam-proxy: он проверяет JWT клиента и спрашивает право публичным
+# AuthorizeService.Check (REST-фронт kaname) токеном самого клиента «о себе» — своих прав в
+# IAM у прокси нет.
+# config.json zot рендерит init vault-agent до старта zot (повторяет, пока лист с
+# ключами бакета не появится); ключи видит только контейнер zot. Сетевая политика
+# пода — волной раньше.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $base | toJson }}
+  labels:
+    {{- include "ri.labels" (dict "root" . "component" "workload") | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "ri.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "ri.labels" (dict "root" . "component" "workload") | nindent 8 }}
+      annotations:
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/agent-init-first: "true"
+        vault.hashicorp.com/agent-pre-populate: "true"
+        vault.hashicorp.com/agent-pre-populate-only: "true"
+        vault.hashicorp.com/agent-inject-containers: zot
+        vault.hashicorp.com/service: {{ .Values.site.vault.address | toJson }}
+        vault.hashicorp.com/ca-cert: {{ $caPath | toJson }}
+        vault.hashicorp.com/auth-path: {{ printf "auth/%s" .Values.vault.authMount | toJson }}
+        vault.hashicorp.com/role: {{ .Values.vault.role | toJson }}
+        vault.hashicorp.com/agent-service-account-token-volume-name: vault-token
+        vault.hashicorp.com/agent-copy-volume-mounts: zot
+        # uid и gid пода: config.json (0440) читает zot. agent-run-as-same-user здесь не годится —
+        # он требует runAsUser у первого контейнера, а uid задан на уровне пода.
+        vault.hashicorp.com/agent-run-as-user: "65532"
+        vault.hashicorp.com/agent-run-as-group: "65532"
+        vault.hashicorp.com/template-config-exit-on-retry-failure: "true"
+        vault.hashicorp.com/agent-requests-cpu: {{ .Values.site.resources.vaultAgent.requests.cpu | toJson }}
+        vault.hashicorp.com/agent-requests-mem: {{ .Values.site.resources.vaultAgent.requests.memory | toJson }}
+        vault.hashicorp.com/agent-limits-cpu: {{ .Values.site.resources.vaultAgent.limits.cpu | toJson }}
+        vault.hashicorp.com/agent-limits-mem: {{ .Values.site.resources.vaultAgent.limits.memory | toJson }}
+        vault.hashicorp.com/agent-inject-secret-config.json: {{ .Values.vault.secretPath | toJson }}
+        vault.hashicorp.com/agent-inject-template-config.json: {{ include "ri.zotConfigTemplate" . | toJson }}
+        vault.hashicorp.com/agent-inject-perms-config.json: "0440"
+    spec:
+      serviceAccountName: {{ $base | toJson }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: zot
+          image: {{ include "ri.image" .Values.site.images.zot | toJson }}
+          imagePullPolicy: IfNotPresent
+          args:
+            - serve
+            - /vault/secrets/config.json
+          volumeMounts:
+            - name: scratch
+              mountPath: /var/lib/zot
+            - name: tmp
+              mountPath: /tmp
+            # CA площадки — для vault-agent (agent-copy-volume-mounts: zot); zot его не читает.
+            - name: ca
+              mountPath: /etc/registry/ca
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources: {{ .Values.site.resources.zot | toJson }}
+        - name: iam-proxy
+          image: {{ include "ri.image" .Values.site.images.iamProxy | toJson }}
+          imagePullPolicy: IfNotPresent
+          # Флаги — контракт cmd/iam-proxy (README.md, «Интерфейс iam-proxy»); перечень
+          # сверяет проба charts/tests с таблицей README, лишний или пропущенный флаг — красное.
+          args:
+            - --listen=:8080
+            - --health-listen=:8081
+            - --upstream=http://127.0.0.1:5000
+            - --upstream-ready-path=/readyz
+            - {{ printf "--registry-id=%s" .Values.instance.id | toJson }}
+            - {{ printf "--public=%t" .Values.instance.public | toJson }}
+            - {{ printf "--jwks-url=%s" .Values.site.kaname.jwksURL | toJson }}
+            - {{ printf "--jwks-ca=%s" $caPath | toJson }}
+            - {{ printf "--issuer=%s" .Values.site.kaname.issuer | toJson }}
+            - {{ printf "--audience=%s" .Values.site.kaname.audience | toJson }}
+            - --token-types=at+jwt
+            - {{ printf "--kaname-url=%s" .Values.site.kaname.url | toJson }}
+            - {{ printf "--kaname-ca=%s" $caPath | toJson }}
+            - {{ printf "--check-timeout=%s" .Values.site.iamProxy.checkTimeout | toJson }}
+            - {{ printf "--cache-ttl=%s" .Values.site.iamProxy.decisionCacheTTL | toJson }}
+            - {{ printf "--enroll-url=%s" .Values.site.registryOperator.registrationURL | toJson }}
+            - {{ printf "--enroll-ca=%s" $caPath | toJson }}
+            - {{ printf "--enroll-token-file=%s/token" $tokenDir | toJson }}
+            - {{ printf "--enroll-timeout=%s" .Values.site.iamProxy.enrollTimeout | toJson }}
+          ports:
+            - name: proxy
+              containerPort: 8080
+              protocol: TCP
+            - name: health
+              containerPort: 8081
+              protocol: TCP
+          # Готовность пода — /readyz iam-proxy: 200, только пока zot отвечает 200 на свой
+          # /readyz (127.0.0.1:5000, --upstream-ready-path) в пределах дедлайна и набор ключей
+          # kaname загружен хотя бы раз; доступность Check kaname в готовность не входит.
+          # Свой вопрос к zot прокси задаёт со сроком 2 с, поэтому пробы ждут ответа 3 с: срок
+          # пробы короче срока прокси снимал бы медленный, но живой zot таймаутом kubelet.
+          # Своих проб у zot нет — решение: зависший zot даёт Unready (трафик снят, Registry
+          # не Ready), а не перезапуск.
+          startupProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            timeoutSeconds: 3
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            timeoutSeconds: 3
+            periodSeconds: 10
+            failureThreshold: 3
+          # Живость — только процесс iam-proxy: перезапуск пода из-за S3 или kaname не лечит ни то, ни другое.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            timeoutSeconds: 1
+            periodSeconds: 20
+            failureThreshold: 3
+          volumeMounts:
+            - name: ca
+              mountPath: /etc/registry/ca
+              readOnly: true
+            - name: registry-operator-token
+              mountPath: {{ $tokenDir | toJson }}
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources: {{ .Values.site.resources.iamProxy | toJson }}
+      volumes:
+        - name: scratch
+          emptyDir:
+            sizeLimit: {{ .Values.site.resources.scratchSizeLimit | toJson }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: ca
+          configMap:
+            name: {{ .Values.site.caBundle.configMap | toJson }}
+            items:
+              - key: {{ .Values.site.caBundle.key | toJson }}
+                path: {{ .Values.site.caBundle.key | toJson }}
+        # Токен входа vault-agent: аудитория Vault; монтирует его только инжектор в
+        # контейнер vault-agent.
+        - name: vault-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: {{ .Values.site.vault.tokenAudience | toJson }}
+                  expirationSeconds: 3600
+                  path: token
+        # Токен заявки на регистрацию репозитория: аудитория registry-operator, только в
+        # контейнере iam-proxy. Оператор сверяет через TokenReview, что это SA zot-<id>.
+        - name: registry-operator-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: {{ .Values.site.registryOperator.tokenAudience | toJson }}
+                  expirationSeconds: 3600
+                  path: token

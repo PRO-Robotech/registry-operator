@@ -1,0 +1,4 @@
+# Близнец: platform-default. Меняется один факт: ни одной закреплённой версии — Addon не на что ставить.
+# expect: at '/instanceChart/pins': minItems
+instanceChart:
+  pins: []

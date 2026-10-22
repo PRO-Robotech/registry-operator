@@ -1,0 +1,34 @@
+{{- if .Values.gateway.enabled }}
+{{- $g := .Values.gateway }}
+---
+# Gateway края. Принимает только HTTPRoute и только из namespace с метками края:
+# маршрутов из namespace арендаторов он не берёт.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: {{ $g.name | toJson }}
+  namespace: {{ $g.namespace | toJson }}
+  labels:
+    {{- include "rp.labels" . | nindent 4 }}
+spec:
+  gatewayClassName: {{ $g.gatewayClassName | toJson }}
+  listeners:
+    - name: {{ $g.sectionName | toJson }}
+      protocol: HTTPS
+      port: 443
+      hostname: {{ $g.host | toJson }}
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - group: ""
+            kind: Secret
+            name: {{ $g.certificateSecretName | toJson }}
+      allowedRoutes:
+        kinds:
+          - group: gateway.networking.k8s.io
+            kind: HTTPRoute
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels: {{ $g.routeNamespaceLabels | toJson }}
+{{- end }}

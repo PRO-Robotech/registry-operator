@@ -1,0 +1,63 @@
+{{- if .Values.sharedRoutes.enabled }}
+{{- $r := .Values.sharedRoutes }}
+{{- range $route := list (dict "name" "registry-api-root" "type" "Exact" "path" "/v2/" "backend" $r.apiRoot.backend) (dict "name" "registry-token" "type" "Exact" "path" "/iam/token" "backend" $r.token.backend) }}
+---
+# Общий маршрут края {{ $route.path }}: один на кластер, на все регистри.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ $route.name | toJson }}
+  namespace: {{ $r.namespace | toJson }}
+  labels:
+    {{- include "rp.labels" $ | nindent 4 }}
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: {{ $r.gateway.name | toJson }}
+      namespace: {{ $r.gateway.namespace | toJson }}
+      sectionName: {{ $r.gateway.sectionName | toJson }}
+  hostnames:
+    - {{ $r.host | toJson }}
+  rules:
+    - matches:
+        - path:
+            type: {{ $route.type | toJson }}
+            value: {{ $route.path | toJson }}
+      backendRefs:
+        - group: ""
+          kind: Service
+          namespace: {{ $route.backend.namespace | toJson }}
+          name: {{ $route.backend.name | toJson }}
+          port: {{ $route.backend.port | int }}
+{{- end }}
+{{- $grants := dict }}
+{{- range $b := list $r.apiRoot.backend $r.token.backend }}
+{{- if ne $b.namespace $r.namespace }}
+{{- $names := get $grants $b.namespace | default (list) }}
+{{- $_ := set $grants $b.namespace (append $names $b.name | uniq) }}
+{{- end }}
+{{- end }}
+{{- range $ns := keys $grants | sortAlpha }}
+---
+# Разрешение общим маршрутам края ссылаться на Service в {{ $ns }} — и только на названные.
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: registry-edge-routes
+  namespace: {{ $ns | toJson }}
+  labels:
+    {{- include "rp.labels" $ | nindent 4 }}
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: {{ $r.namespace | toJson }}
+  to:
+    {{- range $name := get $grants $ns | sortAlpha }}
+    - group: ""
+      kind: Service
+      name: {{ $name | toJson }}
+    {{- end }}
+{{- end }}
+{{- end }}

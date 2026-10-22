@@ -1,0 +1,6 @@
+# Близнец: базовая площадка. Меняется один факт: кэш вердиктов дольше 10 с (отзыв права
+# доходил бы до прокси позже объявленного окна).
+# expect: at '/site/iamProxy/decisionCacheTTL'
+site:
+  iamProxy:
+    decisionCacheTTL: 30s

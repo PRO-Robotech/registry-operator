@@ -1,0 +1,6 @@
+# Близнец: базовая площадка. Меняется один факт: образ iam-proxy без digest.
+# expect: at '/site/images/iamProxy/digest'
+site:
+  images:
+    iamProxy:
+      digest: ""

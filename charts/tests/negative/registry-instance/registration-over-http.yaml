@@ -1,0 +1,5 @@
+# Близнец: базовая площадка. Меняется один факт: эндпоинт регистрации без TLS.
+# expect: at '/site/registryOperator/registrationURL'
+site:
+  registryOperator:
+    registrationURL: http://registry-operator.registry-system.svc:8443

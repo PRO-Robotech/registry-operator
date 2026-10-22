@@ -1,0 +1,7 @@
+# Близнец: platform-all (проект на арендатора). Меняется один факт: Addon по-прежнему в общем проекте.
+# base: all
+# expect: appProjects.enabled requires addon.backend.projectMode=tenant
+addon:
+  backend:
+    projectMode: shared
+    project: registry

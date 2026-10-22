@@ -1,0 +1,5 @@
+# Близнец: базовая площадка. Меняется один факт: набор ключей kaname без TLS.
+# expect: at '/site/kaname/jwksURL'
+site:
+  kaname:
+    jwksURL: http://kaname.example.test:9097/.well-known/jwks.json

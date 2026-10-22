@@ -1,0 +1,13 @@
+# Сверх platform-all: администратор kind — платформа, чтобы setup проб шёл мимо политик,
+# как онбординг площадки. Его сертификат несёт группу kubeadm:cluster-admins (kubeadm с
+# Kubernetes 1.29; прежде — system:masters) и имя kubernetes-admin. Без этого setup
+# проходил лишь тогда, когда политики ещё не вступили в силу, — исход зависел от гонки.
+admission:
+  authors:
+    platformUsers:
+      - platform-admin
+      - kubernetes-admin
+    platformGroups:
+      - platform-admins
+      - kubeadm:cluster-admins
+      - system:masters

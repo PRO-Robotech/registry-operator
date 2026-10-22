@@ -1,0 +1,8 @@
+# chart-testing: только lint (рендер и схемы — charts/tests/run.sh; установка — проба допуска).
+chart-dirs:
+  - charts
+excluded-charts:
+  - tests
+target-branch: main
+check-version-increment: false
+validate-maintainers: false

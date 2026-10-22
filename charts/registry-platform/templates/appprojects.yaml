@@ -1,0 +1,39 @@
+{{- if .Values.appProjects.enabled }}
+{{- $b := .Values.addon.backend }}
+{{- if ne $b.projectMode "tenant" }}
+{{- fail "appProjects.enabled requires addon.backend.projectMode=tenant: a per-tenant project is useless while every Addon names the shared one" }}
+{{- end }}
+{{- range $login := .Values.appProjects.tenants | uniq | sortAlpha }}
+---
+# ПОКА БЕЗ (выключено по умолчанию): проект Argo CD арендатора. Ровно один destination —
+# его namespace; уровня кластера ничего; из видов — только рабочая нагрузка zot.
+# Подменённый чарт с чужим metadata.namespace проект не пропустит.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: {{ printf "%s%s" $b.projectPrefix $login | toJson }}
+  namespace: {{ $b.namespace | toJson }}
+  labels:
+    {{- include "rp.labels" $ | nindent 4 }}
+    registry.in-cloud.io/tenant: {{ $login | toJson }}
+spec:
+  description: {{ printf "On-demand registries of tenant %s" $login | toJson }}
+  sourceRepos:
+    - {{ $.Values.instanceChart.repoURL | toJson }}
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: {{ $login | toJson }}
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+    - group: ""
+      kind: ServiceAccount
+    - group: ""
+      kind: Service
+    - group: apps
+      kind: Deployment
+    - group: cilium.io
+      kind: CiliumNetworkPolicy
+    - group: gateway.networking.k8s.io
+      kind: ReferenceGrant
+{{- end }}
+{{- end }}

@@ -1,0 +1,4 @@
+# Близнец: platform-default. Меняется один факт: общие маршруты без имени хоста.
+# expect: at '/sharedRoutes/host'
+sharedRoutes:
+  host: ""

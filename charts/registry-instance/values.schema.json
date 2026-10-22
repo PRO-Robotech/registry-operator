@@ -1,0 +1,680 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "registry-instance values",
+  "description": "Values of zot and its iam-proxy for one on-demand registry. instance, storage and vault come from the order layer written by registry-operator; site comes from the platform site layer.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "instance",
+    "storage",
+    "vault",
+    "site"
+  ],
+  "definitions": {
+    "dnsLabel": {
+      "type": "string",
+      "maxLength": 63,
+      "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"
+    },
+    "dnsName": {
+      "type": "string",
+      "maxLength": 253,
+      "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]([a-z0-9-]{0,61}[a-z0-9])?$"
+    },
+    "httpsURL": {
+      "description": "https://<dns-name>[:port][/path]; no credentials, query or fragment.",
+      "type": "string",
+      "maxLength": 512,
+      "pattern": "^https://([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(:[0-9]{1,5})?(/[A-Za-z0-9._~/-]*)?$"
+    },
+    "httpsOrigin": {
+      "description": "https://<dns-name>[:port] without a path.",
+      "type": "string",
+      "maxLength": 260,
+      "pattern": "^https://([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(:[0-9]{1,5})?$"
+    },
+    "kanameURL": {
+      "description": "https://<dns-name>[:port] of the public REST front of kaname (AuthorizeService.Check), without a path; the internal listener :9091 is never reachable from the data plane.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/httpsOrigin"
+        },
+        {
+          "not": {
+            "pattern": ":9091$"
+          }
+        }
+      ]
+    },
+    "vaultPath": {
+      "type": "string",
+      "maxLength": 512,
+      "pattern": "^[a-z0-9]([a-z0-9_-]*[a-z0-9])?(/[a-z0-9]([a-z0-9._-]*[a-z0-9])?)+$"
+    },
+    "vaultMount": {
+      "type": "string",
+      "maxLength": 128,
+      "pattern": "^[a-z0-9]([a-z0-9_-]*[a-z0-9])?(/[a-z0-9]([a-z0-9_-]*[a-z0-9])?)*$"
+    },
+    "labelKey": {
+      "type": "string",
+      "pattern": "^([a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?/)?[A-Za-z0-9]([A-Za-z0-9._-]{0,61}[A-Za-z0-9])?$"
+    },
+    "labelValue": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9]([A-Za-z0-9._-]{0,61}[A-Za-z0-9])?$"
+    },
+    "narrowingLabels": {
+      "description": "Selector labels; an empty selector would select every pod, so at least one label is required.",
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 8,
+      "propertyNames": {
+        "$ref": "#/definitions/labelKey"
+      },
+      "additionalProperties": {
+        "$ref": "#/definitions/labelValue"
+      }
+    },
+    "port": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "tag",
+        "digest"
+      ],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "maxLength": 255,
+          "pattern": "^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?(/[a-z0-9]([a-z0-9._-]*[a-z0-9])?)+$"
+        },
+        "tag": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^([A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?$"
+        },
+        "digest": {
+          "description": "Images are pulled by digest only.",
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        }
+      }
+    },
+    "quantity": {
+      "type": "string",
+      "pattern": "^[0-9]+(\\.[0-9]+)?(m|Ki|Mi|Gi|Ti|k|M|G|T)?$"
+    },
+    "resourceList": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cpu": {
+          "$ref": "#/definitions/quantity"
+        },
+        "memory": {
+          "$ref": "#/definitions/quantity"
+        }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requests",
+        "limits"
+      ],
+      "properties": {
+        "requests": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/resourceList"
+            },
+            {
+              "required": [
+                "cpu",
+                "memory"
+              ]
+            }
+          ]
+        },
+        "limits": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/resourceList"
+            },
+            {
+              "required": [
+                "memory"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "peer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ports"
+      ],
+      "oneOf": [
+        {
+          "required": [
+            "fqdn"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "namespace"
+                ]
+              },
+              {
+                "required": [
+                  "labels"
+                ]
+              },
+              {
+                "required": [
+                  "cidr"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "required": [
+            "namespace",
+            "labels"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "fqdn"
+                ]
+              },
+              {
+                "required": [
+                  "cidr"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "required": [
+            "cidr"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "fqdn"
+                ]
+              },
+              {
+                "required": [
+                  "namespace"
+                ]
+              },
+              {
+                "required": [
+                  "labels"
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "properties": {
+        "fqdn": {
+          "$ref": "#/definitions/dnsName"
+        },
+        "namespace": {
+          "$ref": "#/definitions/dnsLabel"
+        },
+        "labels": {
+          "$ref": "#/definitions/narrowingLabels"
+        },
+        "cidr": {
+          "type": "string",
+          "pattern": "^(([0-9]{1,3}\\.){3}[0-9]{1,3}/([0-9]|[12][0-9]|3[0-2])|[0-9a-f:]+/([0-9]|[1-9][0-9]|1[01][0-9]|12[0-8]))$"
+        },
+        "ports": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/definitions/port"
+          }
+        }
+      }
+    },
+    "kanamePeer": {
+      "description": "A kaname peer of the public API (Check, JWKS); the internal listener :9091 is never reachable from the data plane.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/peer"
+        },
+        {
+          "properties": {
+            "ports": {
+              "items": {
+                "not": {
+                  "const": 9091
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "audience": {
+      "type": "string",
+      "pattern": "^[a-z0-9]([a-z0-9.:/-]{0,126}[a-z0-9])?$"
+    },
+    "verdictTTL": {
+      "description": "Verdict cache window, 1s..10s.",
+      "type": "string",
+      "pattern": "^([1-9]|10)s$"
+    },
+    "deadline": {
+      "description": "Deadline of one outbound call, whole seconds.",
+      "type": "string",
+      "pattern": "^[1-9][0-9]?s$"
+    }
+  },
+  "properties": {
+    "global": {
+      "type": "object",
+      "description": "Reserved by Helm for subcharts; unused."
+    },
+    "instance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "login",
+        "registryUID",
+        "syncEpoch",
+        "public"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9]{6,20}$",
+          "description": "Order id; must not start with \"reg\" (checked by the template)."
+        },
+        "login": {
+          "$ref": "#/definitions/dnsLabel"
+        },
+        "registryUID": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "syncEpoch": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "public": {
+          "type": "boolean",
+          "description": "Registry.spec.public: anonymous pull when true."
+        }
+      }
+    },
+    "storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bucket",
+        "endpoint",
+        "region"
+      ],
+      "properties": {
+        "bucket": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 63,
+          "pattern": "^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$"
+        },
+        "endpoint": {
+          "$ref": "#/definitions/httpsOrigin"
+        },
+        "region": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+        }
+      }
+    },
+    "vault": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "secretPath",
+        "authMount",
+        "role"
+      ],
+      "properties": {
+        "secretPath": {
+          "$ref": "#/definitions/vaultPath"
+        },
+        "authMount": {
+          "$ref": "#/definitions/vaultMount"
+        },
+        "role": {
+          "$ref": "#/definitions/dnsLabel"
+        }
+      }
+    },
+    "site": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "caBundle",
+        "vault",
+        "kaname",
+        "registryOperator",
+        "iamProxy",
+        "images",
+        "edge",
+        "network",
+        "resources"
+      ],
+      "properties": {
+        "caBundle": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "configMap",
+            "key"
+          ],
+          "properties": {
+            "configMap": {
+              "$ref": "#/definitions/dnsLabel"
+            },
+            "key": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._-]{1,253}$"
+            }
+          }
+        },
+        "vault": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "address",
+            "tokenAudience"
+          ],
+          "properties": {
+            "address": {
+              "$ref": "#/definitions/httpsOrigin"
+            },
+            "tokenAudience": {
+              "$ref": "#/definitions/audience"
+            }
+          }
+        },
+        "kaname": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "url",
+            "jwksURL",
+            "issuer",
+            "audience"
+          ],
+          "properties": {
+            "url": {
+              "$ref": "#/definitions/kanameURL"
+            },
+            "jwksURL": {
+              "$ref": "#/definitions/httpsURL"
+            },
+            "issuer": {
+              "$ref": "#/definitions/httpsURL"
+            },
+            "audience": {
+              "$ref": "#/definitions/audience"
+            }
+          }
+        },
+        "registryOperator": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "registrationURL",
+            "tokenAudience"
+          ],
+          "properties": {
+            "registrationURL": {
+              "description": "https://host[:port] of the registry-operator enrollment endpoint; iam-proxy appends the request path itself.",
+              "$ref": "#/definitions/httpsOrigin"
+            },
+            "tokenAudience": {
+              "$ref": "#/definitions/audience"
+            }
+          }
+        },
+        "iamProxy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "decisionCacheTTL",
+            "checkTimeout",
+            "enrollTimeout"
+          ],
+          "properties": {
+            "decisionCacheTTL": {
+              "$ref": "#/definitions/verdictTTL"
+            },
+            "checkTimeout": {
+              "description": "1s..30s: iam-proxy refuses to start outside (0, 30s].",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/deadline"
+                },
+                {
+                  "pattern": "^([1-9]|[12][0-9]|30)s$"
+                }
+              ]
+            },
+            "enrollTimeout": {
+              "description": "1s..60s: iam-proxy refuses to start outside (0, 1m].",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/deadline"
+                },
+                {
+                  "pattern": "^([1-9]|[1-5][0-9]|60)s$"
+                }
+              ]
+            }
+          }
+        },
+        "images": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "zot",
+            "iamProxy"
+          ],
+          "properties": {
+            "zot": {
+              "$ref": "#/definitions/image"
+            },
+            "iamProxy": {
+              "$ref": "#/definitions/image"
+            }
+          }
+        },
+        "edge": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "routeNamespace",
+            "proxy"
+          ],
+          "properties": {
+            "routeNamespace": {
+              "description": "Namespace of the edge routes: the only HTTPRoute namespace the ReferenceGrant of this registry admits.",
+              "$ref": "#/definitions/dnsLabel"
+            },
+            "proxy": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "namespace",
+                "gateway"
+              ],
+              "properties": {
+                "namespace": {
+                  "$ref": "#/definitions/dnsLabel"
+                },
+                "gateway": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "name",
+                    "namespace"
+                  ],
+                  "properties": {
+                    "name": {
+                      "$ref": "#/definitions/dnsLabel"
+                    },
+                    "namespace": {
+                      "$ref": "#/definitions/dnsLabel"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "network": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "allowKubeletProbes",
+            "dns",
+            "vault",
+            "kaname",
+            "registryOperator"
+          ],
+          "properties": {
+            "allowKubeletProbes": {
+              "type": "boolean"
+            },
+            "dns": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "namespace",
+                "labels"
+              ],
+              "properties": {
+                "namespace": {
+                  "$ref": "#/definitions/dnsLabel"
+                },
+                "labels": {
+                  "$ref": "#/definitions/narrowingLabels"
+                }
+              }
+            },
+            "vault": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 8,
+              "items": {
+                "$ref": "#/definitions/peer"
+              }
+            },
+            "kaname": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 8,
+              "items": {
+                "$ref": "#/definitions/kanamePeer"
+              }
+            },
+            "registryOperator": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 8,
+              "items": {
+                "$ref": "#/definitions/peer"
+              }
+            }
+          }
+        },
+        "resources": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "zot",
+            "iamProxy",
+            "vaultAgent",
+            "scratchSizeLimit"
+          ],
+          "properties": {
+            "zot": {
+              "$ref": "#/definitions/resources"
+            },
+            "iamProxy": {
+              "$ref": "#/definitions/resources"
+            },
+            "vaultAgent": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "requests",
+                "limits"
+              ],
+              "properties": {
+                "requests": {
+                  "allOf": [
+                    {
+                      "$ref": "#/definitions/resourceList"
+                    },
+                    {
+                      "required": [
+                        "cpu",
+                        "memory"
+                      ]
+                    }
+                  ]
+                },
+                "limits": {
+                  "allOf": [
+                    {
+                      "$ref": "#/definitions/resourceList"
+                    },
+                    {
+                      "required": [
+                        "cpu",
+                        "memory"
+                      ]
+                    }
+                  ]
+                }
+              }
+            },
+            "scratchSizeLimit": {
+              "$ref": "#/definitions/quantity"
+            }
+          }
+        }
+      }
+    }
+  }
+}

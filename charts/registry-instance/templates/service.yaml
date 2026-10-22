@@ -1,0 +1,21 @@
+---
+# Вход в регистри — только iam-proxy (порт proxy); zot снаружи пода не слышен, порт проб
+# в Service не выходит. На этот Service ссылается маршрут края, который ставит
+# registry-operator.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ri.base" . | toJson }}
+  labels:
+    {{- include "ri.labels" (dict "root" . "component" "workload") | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "ri.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: proxy
+      protocol: TCP

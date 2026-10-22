@@ -1,0 +1,177 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Модуль registry в kaname: типы регистри, роли выдачи на регистри и личность модуля.
+# Документ ведётся здесь; доставляется ключом registry.manifest.yaml (README.md,
+# «Манифест модуля kaname»).
+#
+# Раздел resources — ДОСЛОВНО раздел resources файла
+# internal/manifest/testdata/registry.public-read-fixture.yaml репозитория
+# PRO-Robotech/kaname @93ad1b885469c79f284b9fc629f86fe3dde81a97; оттуда и лицензия этого
+# файла. Он объявляет типы канона модели образа kaname — registry_registry (родитель —
+# проект) и registry_repository (родитель — регистри), — и рендер каждого обязан совпасть
+# с блоком канона побайтово, иначе kaname отказывает в пуске; это судит задание CI
+# kaname-manifest кодом kaname. Раздел нужен потому, что вложенное правило роли (children)
+# kaname судит по указателям parents ЭТОГО манифеста. Правится только вслед за каноном.
+#
+# Публичного чтения модуль не выдаёт: анонимное чтение — pull манифестов и блобов, перечень
+# тегов и проверку версии /v2/ — открывает только флаг --public прокси iam-proxy; запрос без
+# токена к регистри без флага получает 401, и о чтении публичного регистри прокси kaname не
+# спрашивает вовсе. Отношение public_reader и подстановочный субъект на get репозитория — текст
+# канона модели, а не выдача: кортежей с подстановочным субъектом и выдач системным классам
+# registry-operator не пишет, роли и личность ниже их не называют.
+#
+# Примечания (notes) у типов ниже — текст канона kaname, и о registry-operator они говорят не
+# всё верно. Примечание registry_registry утверждает, что v_create спрашивает плоскость данных
+# (docker push в новый репозиторий, монтирование в новый, страж блоба первого push). У этого
+# модуля не так: iam-proxy заводит новый репозиторий правом update на регистри (v_update),
+# класса create на регистри роли ниже не несут, и v_create не спрашивает ни один путь
+# registry-operator. Править примечание здесь нельзя: блок обязан совпасть с каноном побайтово,
+# иначе kaname отказывает в пуске. Правится вслед за каноном.
+
+apiVersion: iam/v1
+module: registry
+
+resources:
+
+  - name: registries
+    objectType: registry_registry
+    parents: [project]
+    producer: derived
+    publicReadToChildren: true
+    notes:
+      - before: v_get
+        text: |
+          # #64 Defect A: v_* derive from `owner` so a registry's CREATOR/OWNER (the
+          # RegisterResource `owner` tuple) holds the full CRUD verb-set on their own
+          # registry — esp. v_create (create repositories). Without this the owner got
+          # only editor-tier v_get/v_list/v_update/v_delete (the `edit` role authors no
+          # `create` verb) and CreateRepository denied → 404 for the owner. Per-OBJECT
+          # computed relation (like `editor: this or admin`), NOT a hierarchy cascade.
+          #
+          # `v_create` LIVES HERE AND NOWHERE ELSE — do not "restore parity" by adding it
+          # back to the other types. A registry is a CONTAINER: "create a repository in
+          # this namespace" is a real operation on the registry object, and it is really
+          # asked — by the control plane (CreateRepository / RenameRepository) and by the
+          # data plane (docker push to a new repo, cross-repo mount into a new dst, and
+          # the first-push blob-reveal guard). Every other type answered a question no
+          # request ever asks: "create" is not an operation on an already-existing object,
+          # and creating a resource inside a scope is authorized by the write tier on that
+          # scope. Locked by authzmap/verb_relation_has_reader_test.go, which reds with the
+          # type name if a reader-less carrier reappears.
+    relations:
+      - name: owner
+        definition: '[user, service_account]'
+        position: beforeTiers
+    verbs:
+      - {name: get, from: [owner, super_admin]}
+      - {name: list, from: [owner, super_admin]}
+      - {name: create, from: [owner, super_admin]}
+      - {name: update, from: [owner, super_admin]}
+      - {name: delete, from: [owner, super_admin]}
+      - {name: internalGetRegistryStats, class: get, internal: true}
+      - {name: internalTriggerGarbageCollection, class: delete, internal: true}
+
+  - name: repositories
+    objectType: registry_repository
+    parents:
+      - {name: parent, type: registry_registry}
+    producer: authored
+    notes:
+      - before: super_admin
+        text: |
+          # A repository has no project pointer of its own — it is a child of its
+          # registry, and the registry is the one anchored to a project.
+      - before: v_get
+        text: |
+          # RG-1 D-7: `user:*` public-read wildcard — anonymous pull of a PUBLIC repo.
+          # The wildcard grants v_get ONLY on repos that ALSO carry an explicit
+          # `user:* v_get` tuple emitted by the registry overlay (visibility=PUBLIC);
+          # absent that tuple `user:*` has no access → uniform 404. ONLY v_get gains
+          # the wildcard — no write relation does (anon is a read-only floor, B14).
+          # #64 Defect A: v_* derive from `owner` (repo creator/pusher owner-tuple) so
+          # the repo owner fully manages their own repository; `user:*` wildcard stays
+          # on v_get ONLY (anonymous public-read floor, B14).
+    relations:
+      - name: owner
+        definition: '[user, service_account]'
+        position: beforeTiers
+    verbs:
+      - {name: get, subjects: ['user:*', user, service_account, 'group#member'], from: [owner, super_admin]}
+      - {name: list, from: [owner, super_admin]}
+      - {name: update, from: [owner, super_admin]}
+      - {name: delete, from: [owner, super_admin]}
+
+
+# Роль выдаётся на объект registry.registries:<id> — точечно, роботам заказа, — либо на
+# область iam.account с allInScope (каскадно, выдаёт платформа или владелец аккаунта).
+# Верхнее правило — глаголы на сам регистри; вложенное (children) — на каждый его
+# репозиторий, в том числе заведённый после выдачи: репозиторий регистрируется с цепью
+# предков [registry_registry:<id>, project:<prj>]. Класса create на регистри роль модуля не
+# несёт: kaname его ролью модуля не выдаёт (ни одно действие каталога прав его не спрашивает),
+# поэтому заведение репозитория в регистри iam-proxy судит глаголом update на регистри.
+# Выдачу на один репозиторий (цель registry.repositories:<id>/<repo>) kaname принимает,
+# только если тип цели покрыт правилом ВЕРХНЕГО уровня роли: вложенное правило его не
+# покрывает. Поэтому у puller и pusher второе верхнее правило — на репозитории, с теми же
+# классами, что у вложенного; admin точечно на репозиторий не выдаётся.
+roles:
+
+  - id: registry.puller
+    description: >
+      Чтение образов: регистри, названный целью выдачи, и каждый его
+      репозиторий, включая заведённые позже, либо один репозиторий,
+      названный целью выдачи.
+    tier: {tierType: iam.cluster, tierId: cluster_root}
+    rules:
+      - module: registry
+        resources: [registries]
+        classes: [get]
+        children:
+          - resources: [repositories]
+            classes: [get, list]
+      - module: registry
+        resources: [repositories]
+        classes: [get, list]
+
+  - id: registry.pusher
+    description: >
+      Публикация и чтение образов: новые репозитории в регистри, названном
+      целью выдачи, и запись в каждый его репозиторий, либо запись в один
+      репозиторий, названный целью выдачи.
+    tier: {tierType: iam.cluster, tierId: cluster_root}
+    rules:
+      - module: registry
+        resources: [registries]
+        classes: [get, update]
+        children:
+          - resources: [repositories]
+            classes: [get, list, update]
+      - module: registry
+        resources: [repositories]
+        classes: [get, list, update]
+
+  - id: registry.admin
+    description: >
+      Полное управление регистри, названным целью выдачи, и всеми его
+      репозиториями.
+    tier: {tierType: iam.cluster, tierId: cluster_root}
+    rules:
+      - module: registry
+        resources: [registries]
+        classes: [get, list, update, delete]
+        children:
+          - resources: [repositories]
+            classes: [get, list, update, delete]
+
+# Личность модуля: под ней registry-operator регистрирует registry_registry:<id> и
+# registry_repository:<id>/<repo> (RegisterResource на внутреннем листенере kaname по
+# mTLS). Группа module-relation-writers даёт ей запись кортежей владения только к
+# типам своего модуля. Аккаунт системы подставляет чарт (kanameModule.systemAccount).
+seed:
+  serviceAccounts:
+    - name: kacho-registry
+      account: zzph-system-account
+      description: "Registry module identity of registry-operator: registers registries and repositories in kaname"
+  joins:
+    - serviceAccount: {account: zzph-system-account, name: kacho-registry}
+      group: {account: zzph-system-account, name: module-relation-writers}
+      why: "registry-operator пишет кортежи владения регистри и репозиториев через kaname, а не в хранилище прав напрямую"

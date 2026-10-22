@@ -1,0 +1,180 @@
+# Чарты registry-instance и registry-platform: lint, рендер с golden-сверкой и пробами
+# формы, схемы, ct lint, пробы политик допуска на kind, манифест модуля через загрузчик
+# kaname; публикация OCI — на теги.
+name: charts
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["registry-instance-*", "registry-platform-*"]
+    paths:
+      - charts/**
+      - .github/workflows/charts.yml
+  pull_request:
+    paths:
+      - charts/**
+      - .github/workflows/charts.yml
+
+permissions:
+  contents: read
+
+# Новый прогон той же ветки снимает прежний: занимать раннеры устаревшей головой незачем.
+# Публикацию по тегу не снимает ничто.
+concurrency:
+  group: charts-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+env:
+  HELM_VERSION: v3.22.1
+  KUBECONFORM_VERSION: v0.7.0
+  KUBECONFORM_SHA256: c31518ddd122663b3f3aa874cfe8178cb0988de944f29c74a0b9260920d115d3
+  OPENAPI2JSONSCHEMA_SHA256: d145babfbb765004030764e1b4e518bfb7a4bd7f111691a08fa57983b81881f3
+
+jobs:
+  render:
+    name: render, golden, probes, schemas
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: azure/setup-helm@b9e51907a09c216f16ebe8536097933489208112 # v4.3.0
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - name: tools
+        run: |
+          python -m pip install --disable-pip-version-check pyyaml==6.0.2
+          curl -fsSL -o /tmp/kc.tgz "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  /tmp/kc.tgz" | sha256sum -c -
+          tar -xzf /tmp/kc.tgz -C /usr/local/bin kubeconform
+          curl -fsSL -o /tmp/openapi2jsonschema.py "https://raw.githubusercontent.com/yannh/kubeconform/${KUBECONFORM_VERSION}/scripts/openapi2jsonschema.py"
+          echo "${OPENAPI2JSONSCHEMA_SHA256}  /tmp/openapi2jsonschema.py" | sha256sum -c -
+      - name: schemas from pinned CRDs
+        run: |
+          charts/tests/crds.sh "$RUNNER_TEMP/crds"
+          mkdir -p "$RUNNER_TEMP/schemas" && cd "$RUNNER_TEMP/schemas"
+          FILENAME_FORMAT='{fullgroup}-{kind}_{version}' python /tmp/openapi2jsonschema.py "$RUNNER_TEMP"/crds/*.yaml > /dev/null
+          ls | wc -l
+      - name: charts/tests/run.sh
+        env:
+          SCHEMAS: ${{ runner.temp }}/schemas
+        run: charts/tests/run.sh
+      # Третье место namespace маршрутов края — конфиг оператора (config/samples). На ветке
+      # без него шаг пропущен и виден пропущенным, а не зелёным.
+      - name: route namespace agrees with the operator config
+        if: hashFiles('config/samples/operator-config.yaml') != ''
+        run: python3 charts/tests/lib.py route-namespace .
+      - name: rendered output
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: charts-out
+          path: charts/tests/out/
+          retention-days: 7
+
+  ct:
+    name: chart-testing lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - uses: azure/setup-helm@b9e51907a09c216f16ebe8536097933489208112 # v4.3.0
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - uses: helm/chart-testing-action@0d28d3144d3a25ea2cc349d6e59901c4ff469b3b # v2.7.0
+      - name: ct lint
+        run: |
+          # ct берёт ci/*-values.yaml каждого чарта: входы — те же, что у run.sh.
+          python -m pip install --disable-pip-version-check pyyaml==6.0.2
+          charts/tests/ct-values.sh
+          ct lint --config charts/ct.yaml --all
+
+  admission:
+    name: admission policies on kind
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: azure/setup-helm@b9e51907a09c216f16ebe8536097933489208112 # v4.3.0
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - uses: helm/kind-action@a1b0e391336a6ee6713a0583f8c6240d70863de3 # v1.12.0
+        with:
+          version: v0.29.0
+          cluster_name: admission
+      - name: probes
+        run: |
+          python -m pip install --disable-pip-version-check pyyaml==6.0.2
+          charts/tests/crds.sh "$RUNNER_TEMP/crds"
+          CRDS="$RUNNER_TEMP/crds" charts/tests/admission/run.sh
+
+  kaname-manifest:
+    name: module manifest through the kaname loader
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      # Ревизия kaname, чей код судит доставку: та же, что образ стенда prorobotech/kaname:main-93ad1b88.
+      KANAME_REF: 93ad1b885469c79f284b9fc629f86fe3dde81a97
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: azure/setup-helm@b9e51907a09c216f16ebe8536097933489208112 # v4.3.0
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - name: delivery from the render
+        run: |
+          python -m pip install --disable-pip-version-check pyyaml==6.0.2
+          helm template registry-platform charts/registry-platform --kube-version 1.30.0 \
+            -f charts/tests/cases/platform-default.yaml -f charts/tests/cases/platform-all.yaml > "$RUNNER_TEMP/platform.yaml"
+          python3 charts/tests/lib.py manifest "$RUNNER_TEMP/platform.yaml" "$RUNNER_TEMP/delivery"
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: PRO-Robotech/kaname
+          ref: ${{ env.KANAME_REF }}
+          path: kaname
+          persist-credentials: false
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: kaname/go.mod
+          cache-dependency-path: kaname/go.sum
+      # Пакеты загрузки kaname внутренние: проба исполняется пакетом внутри его модуля.
+      - name: go test in kaname
+        env:
+          REGOP_DELIVERY: ${{ runner.temp }}/delivery
+        run: |
+          mkdir -p kaname/internal/registryoperatorprobe
+          cp charts/tests/kaname/testdata/manifest_load_test.go kaname/internal/registryoperatorprobe/
+          cd kaname && go test -count=1 -v ./internal/registryoperatorprobe/
+
+  publish:
+    name: publish OCI
+    if: startsWith(github.ref, 'refs/tags/registry-instance-') || startsWith(github.ref, 'refs/tags/registry-platform-')
+    needs: [render, ct, admission, kaname-manifest]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: azure/setup-helm@b9e51907a09c216f16ebe8536097933489208112 # v4.3.0
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - name: package and push
+        env:
+          REF: ${{ github.ref_name }}
+          ACTOR: ${{ github.actor }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: charts/publish.sh "$REF"

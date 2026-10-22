@@ -1,0 +1,28 @@
+# Сверх platform-default: проект на арендатора, политики допуска и AppProject включены.
+addon:
+  backend:
+    projectMode: tenant
+    project: ""
+admission:
+  enabled: true
+  paramsNamespace: registry-system
+  authors:
+    registryOperator: system:serviceaccount:registry-system:registry-operator
+    addonsOperator: system:serviceaccount:addons-system:addons-operator
+    argoController: system:serviceaccount:argocd:argocd-application-controller
+    platformUsers:
+      - platform-admin
+    platformGroups:
+      - platform-admins
+  vault:
+    config: default
+    s3Config: s3-default
+    authMount: kubernetes-tenants
+    secretsPrefix: clusters/example
+  routeNamespace: registry-edge
+  routeHost: registry.example.test
+appProjects:
+  enabled: true
+  tenants:
+    - cust01
+    - cust02
