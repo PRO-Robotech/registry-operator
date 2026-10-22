@@ -8,14 +8,12 @@ admission:
   paramsNamespace: registry-system
   authors:
     registryOperator: system:serviceaccount:registry-system:registry-operator
-    registrar: system:serviceaccount:registry-system:registry-registrar
     addonsOperator: system:serviceaccount:addons-system:addons-operator
     argoController: system:serviceaccount:argocd:argocd-application-controller
     platformUsers:
       - platform-admin
     platformGroups:
       - platform-admins
-  pkiPolicy: registry-dataplane-pki
   vault:
     config: default
     s3Config: s3-default

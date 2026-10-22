@@ -1,5 +1,5 @@
 # Близнец: базовая площадка. Меняется один факт: Vault недостижим по политике (пиров нет).
-# expect: site.network.vault
+# expect: at '/site/network/vault': minItems
 site:
   network:
     vault: []

@@ -2,5 +2,5 @@
 # которое addons-operator исполнил бы.
 # expect: platform values must not contain "{{"
 site:
-  sidecar:
+  kaname:
     audience: "{{ env }}"

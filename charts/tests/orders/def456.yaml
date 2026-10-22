@@ -1,8 +1,10 @@
-# Второй заказ, другой арендатор, порт S3 не по умолчанию и эпоха после восстановления.
+# Второй заказ: другой арендатор, порт S3 не по умолчанию, эпоха после восстановления,
+# публичный регистри (pull без токена).
 id: def456
 login: cust02
 registryUID: 0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d
 syncEpoch: "3"
+public: "true"
 bucket: cust02-zot-def456
 endpoint: https://storage.example.test:9443
 region: ru-1

@@ -1,0 +1,7 @@
+# Близнец: базовая площадка. Меняется один факт: выход к kaname на внутренний листенер :9091.
+# expect: at '/site/network/kaname/0/ports/0'
+site:
+  network:
+    kaname:
+      - fqdn: kaname.example.test
+        ports: [9091, 9097]

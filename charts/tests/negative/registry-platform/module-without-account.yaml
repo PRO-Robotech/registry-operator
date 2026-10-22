@@ -1,0 +1,5 @@
+# Близнец: platform-default. Меняется один факт: манифест модуля включён без аккаунта
+# системы kaname — личность модуля некуда завести.
+# expect: at '/kanameModule/systemAccount'
+kanameModule:
+  systemAccount: ""

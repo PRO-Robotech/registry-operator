@@ -73,8 +73,10 @@ def cmd_vars(order, out):
         return 1
     claim = {"metadata": {"name": "reg-" + variables["id"], "namespace": variables["login"]},
              "spec": {"variables": variables}}
+    # JSON — подмножество YAML, где строка всегда в кавычках: «1e3» и «true» остаются
+    # строками, как в Addon.spec.variables, а не становятся числом или логическим.
     with open(out, "w", encoding="utf-8") as f:
-        yaml.safe_dump({"variables": variables, "claim": claim}, f, sort_keys=True)
+        json.dump({"variables": variables, "claim": claim}, f, sort_keys=True, indent=1)
     return 0
 
 
@@ -121,12 +123,14 @@ def cmd_probe_instance(render, site_file, vars_file, probes_on):
     base = "zot-" + v["id"]
     kinds = sorted(d["kind"] for d in ds)
     p.check(kinds == ["CiliumNetworkPolicy", "Deployment", "Service", "ServiceAccount"],
-            f"exactly the zot workload is rendered, got {kinds}")
+            f"exactly zot with its iam-proxy is rendered, got {kinds}")
     text = yaml.safe_dump_all(ds)
     p.check("PersistentVolumeClaim" not in text and "persistentVolumeClaim" not in text
             and "volumeClaimTemplates" not in text and "hostPath" not in text,
             "no persistent or host volumes")
     p.check("<path:" not in text and "argocdPlugins" not in text, "no secret-plugin substitutions")
+    p.check("pkiCert" not in text and "tls.pem" not in text and "Certificate" not in kinds,
+            "no client certificate: iam-proxy has no identity of its own")
     for d in ds:
         md = d["metadata"]
         p.check(md["name"] == base, f"{d['kind']} is named {base}")
@@ -150,22 +154,60 @@ def cmd_probe_instance(render, site_file, vars_file, probes_on):
         for c in containers(dep):
             p.check(bool(DIGEST.search(c["image"])), f"image of {c['name']} is pinned by digest")
         names = [c["name"] for c in pod["containers"]]
-        p.check(names == ["zot", "sidecar"], f"containers zot and sidecar, got {names}")
-        side = pod["containers"][1]
-        p.check("--mode=sidecar" in side["args"], "sidecar runs svc-registry --mode=sidecar")
-        p.check(f"--registry-id={v['id']}" in side["args"], "sidecar checks rights on its own registry")
-        p.check([pp["containerPort"] for pp in side["ports"]] == [8080], "only the sidecar listens outside")
-        p.check(pod["containers"][0]["args"] == ["serve", "/vault/secrets/config.json"], "zot reads the rendered config")
+        p.check(names == ["zot", "iam-proxy"], f"containers zot and iam-proxy, got {names}")
+        zot = pod["containers"][0]
+        proxy = pod["containers"][1] if len(pod["containers"]) > 1 else {"args": [], "ports": [], "volumeMounts": []}
+        img = site["images"]["iamProxy"]
+        p.check(proxy.get("image", "").startswith(img["repository"] + ":" + img["tag"] + "@"),
+                "iam-proxy runs the site image of registry-iam-proxy")
+        args = proxy["args"]
+        want = {
+            "--registry-id": v["id"],
+            "--anonymous-pull": v["public"],
+            "--kaname-api-url": site["kaname"]["apiURL"],
+            "--jwks-url": site["kaname"]["jwksURL"],
+            "--issuer": site["kaname"]["issuer"],
+            "--audience": site["kaname"]["audience"],
+            "--decision-cache-ttl": site["iamProxy"]["decisionCacheTTL"],
+            "--registration-url": site["registryOperator"]["registrationURL"],
+            "--upstream": "http://127.0.0.1:5000",
+        }
+        got = dict(a.split("=", 1) for a in args if "=" in a)
+        for k, val in want.items():
+            p.check(got.get(k) == val, f"iam-proxy {k}={val}, got {got.get(k)}")
+        p.check(not any("9091" in a for a in args), "iam-proxy never names the kaname internal listener")
+        ttl = int(got.get("--decision-cache-ttl", "99s")[:-1])
+        p.check(1 <= ttl <= 10, "verdict cache is at most 10 s")
+        p.check([(pp["name"], pp["containerPort"]) for pp in proxy["ports"]] == [("proxy", 8080), ("health", 8081)],
+                "iam-proxy listens on :8080 (proxy) and :8081 (probes)")
+        p.check(proxy["readinessProbe"]["httpGet"]["port"] == "health" and proxy["livenessProbe"]["httpGet"]["port"] == "health",
+                "probes go to the health port")
+        p.check("ports" not in zot, "zot exposes no port")
+        p.check(zot["args"] == ["serve", "/vault/secrets/config.json"], "zot reads the rendered config")
         vols = {x["name"]: x for x in pod["volumes"]}
         p.check(all("emptyDir" in vols[n] for n in ("scratch", "tmp")), "temporary storage is emptyDir")
+        tok = vols.get("registry-operator-token", {}).get("projected", {}).get("sources", [{}])[0].get("serviceAccountToken", {})
+        p.check(tok.get("audience") == site["registryOperator"]["tokenAudience"], "registration token has the registry-operator audience")
+        vt = vols.get("vault-token", {}).get("projected", {}).get("sources", [{}])[0].get("serviceAccountToken", {})
+        p.check(vt.get("audience") == site["vault"]["tokenAudience"] != tok.get("audience"), "Vault token has its own audience")
+        mounts = {c["name"]: {m["name"] for m in c.get("volumeMounts", [])} for c in pod["containers"]}
+        p.check([n for n, ms in mounts.items() if "registry-operator-token" in ms] == ["iam-proxy"],
+                "registration token is mounted into iam-proxy only")
+        p.check(not any("vault-token" in ms for ms in mounts.values()), "Vault token is mounted by the injector only")
+        p.check(ann.get("vault.hashicorp.com/agent-inject-containers") == "zot", "bucket keys reach the zot container only")
         p.check(ann.get("vault.hashicorp.com/auth-path") == "auth/" + v["vaultAuthMount"], "vault-agent logs in at auth/<mount>")
         p.check(ann.get("vault.hashicorp.com/role") == base == v["vaultRole"], "vault-agent role is zot-<id>")
         p.check(ann.get("vault.hashicorp.com/service") == site["vault"]["address"], "vault-agent talks to the site Vault over https")
         p.check(ann.get("vault.hashicorp.com/agent-init-first") == "true"
-                and ann.get("vault.hashicorp.com/agent-pre-populate") == "true",
-                "init vault-agent renders config before zot starts")
+                and ann.get("vault.hashicorp.com/agent-pre-populate") == "true"
+                and ann.get("vault.hashicorp.com/agent-pre-populate-only") == "true",
+                "init vault-agent renders config before zot starts, no agent sidecar")
+        p.check(ann.get("vault.hashicorp.com/template-config-exit-on-retry-failure") == "true",
+                "init vault-agent fails and is restarted until the leaf exists")
         p.check(ann.get("vault.hashicorp.com/agent-inject-secret-config.json") == v["vaultSecretPath"],
                 "config is rendered from the order leaf")
+        p.check(sorted(k for k in ann if k.startswith("vault.hashicorp.com/agent-inject-secret-")) == ["vault.hashicorp.com/agent-inject-secret-config.json"],
+                "vault-agent renders exactly one file")
         tmpl = ann.get("vault.hashicorp.com/agent-inject-template-config.json", "")
         p.check(tmpl.startswith('{{- with secret "%s" -}}' % v["vaultSecretPath"]) and tmpl.endswith("{{- end -}}"),
                 "config template reads exactly the order leaf")
@@ -183,7 +225,7 @@ def cmd_probe_instance(render, site_file, vars_file, probes_on):
             p.check(False, f"config template is JSON with two leaf keys: {e}")
     svc = by.get("Service")
     if svc:
-        p.check([(x["port"], x["targetPort"]) for x in svc["spec"]["ports"]] == [(8080, "proxy")], "Service exposes only the sidecar")
+        p.check([(x["port"], x["targetPort"]) for x in svc["spec"]["ports"]] == [(8080, "proxy")], "Service exposes only iam-proxy")
     cnp = by.get("CiliumNetworkPolicy")
     if cnp:
         spec = cnp["spec"]
@@ -198,7 +240,7 @@ def cmd_probe_instance(render, site_file, vars_file, probes_on):
         p.check(ing[0].get("fromEndpoints") == [{"matchLabels": want_from}] and ports_of(ing[0]) == {("8080", "TCP")},
                 "ingress from the Envoy Gateway proxy of its own Gateway to :8080")
         if probes_on and len(ing) > 1:
-            p.check(ing[1].get("fromEntities") == ["host"] and ports_of(ing[1]) == {("8080", "TCP")}, "kubelet probes to :8080 only")
+            p.check(ing[1].get("fromEntities") == ["host"] and ports_of(ing[1]) == {("8081", "TCP")}, "kubelet probes to :8081 only")
         eg = spec["egress"]
         dns = eg[0]
         p.check(ports_of(dns) == {("53", "UDP"), ("53", "TCP")} and "rules" in dns["toPorts"][0], "egress 1: DNS with name rules")
@@ -206,17 +248,31 @@ def cmd_probe_instance(render, site_file, vars_file, probes_on):
         s3port = v["endpoint"].rsplit(":", 1)[1] if v["endpoint"].count(":") == 2 else "443"
         p.check(eg[1] == {"toFQDNs": [{"matchName": s3host}], "toPorts": [{"ports": [{"port": s3port, "protocol": "TCP"}]}]},
                 "egress 2: the order S3 endpoint only")
-        peers = site["network"]["vault"] + site["network"]["kaname"]
-        p.check(len(eg) == 2 + len(peers), f"egress rules: DNS, S3 and {len(peers)} Vault/kaname peers, nothing else")
+        net = site["network"]
+        peers = net["vault"] + net["kaname"] + net["registryOperator"]
+        p.check(len(eg) == 2 + len(peers), f"egress rules: DNS, S3 and {len(peers)} Vault/kaname/registry-operator peers, nothing else")
         for rule, peer in zip(eg[2:], peers):
             p.check(ports_of(rule) == {(str(x), "TCP") for x in peer["ports"]}, f"peer {peer} ports exactly")
-        kaname_ports = set()
-        for rule in eg[2 + len(site["network"]["vault"]):]:
-            kaname_ports |= {pp for pp, _ in ports_of(rule)}
-        p.check(kaname_ports <= {"9091", "9097"}, f"kaname only on :9091/:9097, got {sorted(kaname_ports)}")
+            if "fqdn" in peer:
+                p.check(rule.get("toFQDNs") == [{"matchName": peer["fqdn"]}], f"peer {peer['fqdn']} by name only")
+            elif "namespace" in peer:
+                want = {"k8s:io.kubernetes.pod.namespace": peer["namespace"]}
+                want.update({"k8s:" + k: val for k, val in peer["labels"].items()})
+                p.check(rule.get("toEndpoints") == [{"matchLabels": want}], f"peer {peer['namespace']} by namespace and labels")
+        all_ports = {pp for rule in eg[2:] for pp, _ in ports_of(rule)}
+        p.check("9091" not in all_ports, f"no egress to the kaname internal listener, got {sorted(all_ports)}")
         dns_names = {r.get("matchName") for r in dns["toPorts"][0]["rules"]["dns"] if "matchName" in r}
-        p.check(s3host in dns_names, "S3 host resolvable")
+        hosts = {s3host} | {re.sub(r"^https://([^/:]+).*$", r"\1", u) for u in (
+            site["vault"]["address"], site["kaname"]["apiURL"], site["kaname"]["jwksURL"], site["registryOperator"]["registrationURL"])}
+        p.check(hosts <= dns_names, f"S3, Vault, kaname and registry-operator hosts resolvable, missing {sorted(hosts - dns_names)}")
     return p.done()
+
+
+def manifest_of(ds):
+    for d in ds:
+        if d["kind"] == "ConfigMap" and "registry.manifest.yaml" in d.get("data", {}):
+            return d, yaml.safe_load(d["data"]["registry.manifest.yaml"])
+    return None, None
 
 
 def cmd_probe_platform(render, mode):
@@ -235,21 +291,54 @@ def cmd_probe_platform(render, mode):
         if d["kind"] == "AddonTemplate":
             ann = d["metadata"]["annotations"]["registry.in-cloud.io/chart-digest"]
             p.check(re.fullmatch(r"sha256:[a-f0-9]{64}", ann) is not None, "AddonTemplate pins the chart digest")
+            p.check("public: {{ .Vars.public | toString | toJson }}" in d["spec"]["template"],
+                    "Addon carries the public variable of the order")
         if d["kind"] == "HTTPRoute":
             paths = [m["path"] for r in d["spec"]["rules"] for m in r["matches"]]
             p.check(len(paths) == 1 and paths[0]["type"] == "Exact" and paths[0]["value"] in ("/v2/", "/iam/token"),
                     f"shared route {d['metadata']['name']} matches one exact path")
+    cm, m = manifest_of(ds)
+    p.check(cm is not None, "kaname module manifest of registry is rendered")
+    if cm is not None:
+        p.check(list(cm["data"]) == ["registry.manifest.yaml"], "the manifest ConfigMap carries exactly one delivery key")
+        p.check(cm["metadata"]["labels"].get("app.kubernetes.io/part-of") == "registry", "manifest ConfigMap is labelled part-of registry")
+        p.check(m.get("apiVersion") == "iam/v1" and m.get("module") == "registry", "manifest of module registry, iam/v1")
+        res = {r["objectType"]: r for r in m.get("resources", [])}
+        p.check(sorted(res) == ["registry_registry", "registry_repository"], f"types registry_registry and registry_repository, got {sorted(res)}")
+        p.check(res.get("registry_registry", {}).get("parents") == ["project"], "a registry hangs under its project")
+        p.check(res.get("registry_repository", {}).get("parents") == [{"name": "parent", "type": "registry_registry"}],
+                "a repository hangs under its registry")
+        verbs = {r: {x["name"] for x in res.get(r, {}).get("verbs", [])} for r in res}
+        p.check({"get", "create", "update"} <= verbs.get("registry_registry", set()), "registry has get, create, update")
+        p.check({"get", "update"} <= verbs.get("registry_repository", set()), "repository has get, update")
+        roles = {r["id"]: r for r in m.get("roles", [])}
+        p.check(sorted(roles) == ["registry.admin", "registry.puller", "registry.pusher"], f"roles puller, pusher, admin, got {sorted(roles)}")
+        want = {"registry.puller": (["get"], ["get", "list"]),
+                "registry.pusher": (["get", "create"], ["get", "list", "update"]),
+                "registry.admin": (["get", "list", "create", "update", "delete"], ["get", "list", "update", "delete"])}
+        for rid, (reg, repo) in want.items():
+            rules = roles.get(rid, {}).get("rules", [])
+            ok = (len(rules) == 1 and rules[0].get("resources") == ["registries"] and rules[0].get("classes") == reg
+                  and rules[0].get("children") == [{"resources": ["repositories"], "classes": repo}])
+            p.check(ok, f"{rid}: {reg} on the registry and {repo} on each of its repositories through children")
+        seed = m.get("seed", {})
+        sas = [s["name"] for s in seed.get("serviceAccounts", [])]
+        p.check(sas == ["kacho-registry"], f"seed: only the module identity kacho-registry, got {sas}")
+        joins = [(j["serviceAccount"]["name"], j["group"]["name"]) for j in seed.get("joins", [])]
+        p.check(joins == [("kacho-registry", "module-relation-writers")], f"kacho-registry writes ownership tuples, got {joins}")
     vap = kinds.get("ValidatingAdmissionPolicy", [])
     bind = kinds.get("ValidatingAdmissionPolicyBinding", [])
     proj = kinds.get("AppProject", [])
+    others = [n for n in kinds.get("ConfigMap", []) if cm is None or n != cm["metadata"]["name"]]
     if mode == "default":
         p.check(not vap and not bind, "no admission policies by default")
         p.check(not proj, "no AppProject by default")
-        p.check("ConfigMap" not in kinds, "no admission parameters by default")
+        p.check(not others, f"no admission parameters by default, got {others}")
     else:
         ids = sorted(int(n.split("-")[0][1:]) for n in vap)
         p.check(ids == list(range(1, 16)), f"admission policies V1..V15, got {ids}")
         p.check(sorted(bind) == sorted(vap), "every policy has its binding")
+        p.check(others == ["registry-platform-admission"], f"admission parameters, got {others}")
         p.check(sorted(proj) == ["registry-cust01", "registry-cust02"], f"one AppProject per tenant, got {proj}")
         for d in ds:
             if d["kind"] == "ValidatingAdmissionPolicy":
@@ -261,6 +350,9 @@ def cmd_probe_platform(render, mode):
                 s = d["spec"]
                 p.check(len(s["destinations"]) == 1 and s["clusterResourceWhitelist"] == [] and "sourceNamespaces" not in s,
                         f"{d['metadata']['name']} has one destination and no cluster resources")
+            if d["kind"] == "ConfigMap" and d["metadata"]["name"] == "registry-platform-admission":
+                p.check("registrar" not in d["data"] and "pkiPolicy" not in d["data"],
+                        "no second registry writer and no data-plane PKI in the parameters")
     return p.done()
 
 
@@ -271,12 +363,10 @@ def cmd_no_lua(paths):
     for root in map(pathlib.Path, paths):
         files += [root] if root.is_file() else sorted(x for x in root.rglob("*") if x.is_file())
     for f in files:
-        if f.name == "lib.py":
-            continue
-            seen += 1
-            text = f.read_text(encoding="utf-8", errors="replace")
-            p.check(f.suffix != ".lua", f"{f} is a Lua file")
-            p.check("resource.customizations" not in text and "health.lua" not in text, f"{f} carries an Argo CD health check")
+        seen += 1
+        text = f.read_text(encoding="utf-8", errors="replace")
+        p.check(f.suffix != ".lua", f"{f} is a Lua file")
+        p.check("resource.customizations" not in text and "health.lua" not in text, f"{f} carries an Argo CD health check")
     print(f"no-lua: files read {seen}")
     return p.done() if seen else 1
 

@@ -1,5 +1,5 @@
 # Близнец: platform-default. Меняется один факт: версия без digest (изменяемый тег).
-# expect: instanceChart.pins.0.digest
+# expect: at '/instanceChart/pins/0/digest'
 instanceChart:
   pins:
     - version: 1.0.0

@@ -1,0 +1,6 @@
+# Близнец: базовая площадка. Меняется один факт: эндпоинт регистрации registry-operator
+# недостижим по политике (пиров нет).
+# expect: at '/site/network/registryOperator': minItems
+site:
+  network:
+    registryOperator: []

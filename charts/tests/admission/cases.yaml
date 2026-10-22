@@ -101,6 +101,7 @@ objects:
         login: cust01
         registryUID: 3f1c2a9e-7b4d-4e8a-9c21-5d6f7a8b9c0d
         syncEpoch: "0"
+        public: "false"
         bucket: cust01-zot-abc123
         endpoint: https://s3.example.test
         region: ru-1
@@ -151,7 +152,7 @@ objects:
         - name: zot-abc123
           boundServiceAccounts: {names: [zot-abc123], namespace: cust01}
           audience: vault
-          policies: [zot-abc123-kv, registry-dataplane-pki]
+          policies: [zot-abc123-kv]
           tokenTTL: 1h
           tokenMaxTTL: 1h
       deletionPolicy: Retain
@@ -234,8 +235,9 @@ cases:
   # V14 — роль Vault и бакет заказа.
   - {name: v14-stranger-creates-vaultclaim, policy: v14-registry-vault-claims, as: stranger, verb: create, expect: deny, object: *vaultclaim}
   - {name: v14-operator-creates-vaultclaim, policy: v14-registry-vault-claims, as: operator, verb: create, expect: allow, object: *vaultclaim}
-  - {name: v14-operator-owns-the-mount, policy: v14-registry-vault-claims, as: operator, verb: create, expect: deny, object: *vaultclaim, set: {spec.auth.manageConfig: true}}
-  - {name: v14-operator-binds-foreign-sa, policy: v14-registry-vault-claims, as: operator, verb: create, expect: deny, object: *vaultclaim, set: {spec.roles: [{name: zot-abc123, boundServiceAccounts: {names: [default], namespace: cust01}, audience: vault, policies: [zot-abc123-kv, registry-dataplane-pki], tokenTTL: 1h, tokenMaxTTL: 1h}]}}
+  - {name: v14-operator-foreign-secrets-prefix, policy: v14-registry-vault-claims, as: operator, verb: create, expect: deny, object: *vaultclaim, set: {spec.secretsPrefix: clusters/other}}
+  - {name: v14-operator-attaches-platform-policy, policy: v14-registry-vault-claims, as: operator, verb: create, expect: deny, object: *vaultclaim, set: {spec.roles: [{name: zot-abc123, boundServiceAccounts: {names: [zot-abc123], namespace: cust01}, audience: vault, policies: [zot-abc123-kv, platform-wide], tokenTTL: 1h, tokenMaxTTL: 1h}]}}
+  - {name: v14-operator-binds-foreign-sa, policy: v14-registry-vault-claims, as: operator, verb: create, expect: deny, object: *vaultclaim, set: {spec.roles: [{name: zot-abc123, boundServiceAccounts: {names: [default], namespace: cust01}, audience: vault, policies: [zot-abc123-kv], tokenTTL: 1h, tokenMaxTTL: 1h}]}}
   - {name: v14-operator-creates-bucket, policy: v14-registry-vault-claims, as: operator, verb: create, expect: allow, object: *bucket}
   - {name: v14-operator-public-bucket, policy: v14-registry-vault-claims, as: operator, verb: create, expect: deny, object: *bucket, set: {spec.bucket: {public: true, managedBy: SYSTEM}}}
   # V15 — Application заказа.

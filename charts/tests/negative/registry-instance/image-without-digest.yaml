@@ -1,6 +1,6 @@
-# Близнец: базовая площадка. Меняется один факт: образ сайдкара без digest.
-# expect: site.images.sidecar.digest
+# Близнец: базовая площадка. Меняется один факт: образ iam-proxy без digest.
+# expect: at '/site/images/iamProxy/digest'
 site:
   images:
-    sidecar:
+    iamProxy:
       digest: ""

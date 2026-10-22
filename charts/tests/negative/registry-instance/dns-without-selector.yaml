@@ -1,5 +1,5 @@
-# Близнец: базовая площадка. Меняется один факт: пустой селектор DNS (выбрал бы все поды namespace).
-# expect: site.network.dns.labels
+# Близнец: базовая площадка. Меняется один факт: селектор DNS снят (выбрал бы все поды namespace).
+# expect: at '/site/network/dns': missing property 'labels'
 site:
   network:
     dns:

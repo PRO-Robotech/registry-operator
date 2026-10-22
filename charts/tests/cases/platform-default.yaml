@@ -9,29 +9,29 @@ addon:
     projectMode: shared
     project: registry
 site:
+  caBundle:
+    configMap: platform-ca
+    key: ca.crt
   vault:
     address: https://vault.vault.svc:8200
-    caConfigMap:
-      name: platform-ca
-      key: ca.crt
     tokenAudience: vault
-    pki:
-      mount: pki-dataplane
-      role: registry-dataplane
-      commonName: registry-dataplane.example.test
-      uriSAN: spiffe://example.test/ns/registry-dataplane/sa/registry-dataplane
   kaname:
-    checkAddress: kaname-internal.example.test:9091
+    apiURL: https://kaname.example.test
     jwksURL: https://kaname.example.test:9097/.well-known/jwks.json
-  sidecar:
+    issuer: https://kaname.example.test
     audience: registry
+  registryOperator:
+    registrationURL: https://registry-operator.registry-system.svc:9443/v1/repositories
+    tokenAudience: registry-operator
+  iamProxy:
+    decisionCacheTTL: 10s
   images:
     zot:
       repository: ghcr.io/project-zot/zot-linux-amd64
       tag: v2.1.20
       digest: sha256:95a837a0afacf5b7edc0c92493f04beee6891989b8d2fd50a00cf65a1e6d4fd5
-    sidecar:
-      repository: ghcr.io/pro-robotech/svc-registry
+    iamProxy:
+      repository: docker.io/prorobotech/registry-iam-proxy
       tag: v0.1.0
       digest: sha256:2e7b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809
   edge:
@@ -52,21 +52,29 @@ site:
           app.kubernetes.io/name: vault
         ports: [8200]
     kaname:
-      - fqdn: kaname-internal.example.test
-        ports: [9091]
       - fqdn: kaname.example.test
-        ports: [9097]
+        ports: [443, 9097]
+    registryOperator:
+      - namespace: registry-system
+        labels:
+          app.kubernetes.io/name: registry-operator
+        ports: [9443]
   resources:
     zot:
       requests: {cpu: 100m, memory: 256Mi}
       limits: {memory: 1Gi}
-    sidecar:
+    iamProxy:
       requests: {cpu: 20m, memory: 32Mi}
       limits: {memory: 128Mi}
     vaultAgent:
       requests: {cpu: 10m, memory: 32Mi}
       limits: {cpu: 100m, memory: 64Mi}
     scratchSizeLimit: 2Gi
+kanameModule:
+  enabled: true
+  namespace: kaname
+  configMapName: registry-module-manifest
+  systemAccount: kacho-system
 sharedRoutes:
   enabled: true
   namespace: registry-edge

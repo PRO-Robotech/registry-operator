@@ -110,17 +110,21 @@ done
 
 # 4. Отрицательные пробы: рендер обязан отказать с ожидаемым текстом. Близнец каждой —
 # базовый рендер того же чарта выше (зелёный); проба меняет ровно один факт.
-negative() { # negative <файл> <команда рендера…>
+refuses() { # refuses <файл с «# expect:»> <команда рендера…> — команда обязана отказать с текстом
   local file="$1"; shift
   local expect; expect="$(sed -n 's/^# expect: //p' "$file")"
   [ -n "$expect" ] || { bad "negative $(basename "$file"): no «# expect:» line"; return; }
-  if "$@" -f "$file" > "$OUT/neg.out" 2> "$OUT/neg.err"; then
+  if "$@" > "$OUT/neg.out" 2> "$OUT/neg.err"; then
     bad "negative $(basename "$file" .yaml): rendered, expected refusal «$expect»"
   elif grep -qF -- "$expect" "$OUT/neg.err"; then
     ok "negative $(basename "$file" .yaml)"
   else
     bad "negative $(basename "$file" .yaml): refused for another reason"; sed 's/^/  | /' "$OUT/neg.err"
   fi
+}
+negative() { # negative <файл> <команда рендера…> — файл ложится последним слоем значений
+  local file="$1"; shift
+  refuses "$file" "$@" -f "$file"
 }
 n=0
 for f in "$T"/negative/registry-instance/*.yaml; do
@@ -140,13 +144,14 @@ for f in "$T"/negative/order/*.yaml; do
   n=$((n + 1))
   expect="$(sed -n 's/^# expect: //p' "$f")"
   python3 - "$T/orders/abc123.yaml" "$f" "$OUT/layers/neg-order.yaml" <<'EOF'
-import sys, yaml
-o = yaml.safe_load(open(sys.argv[1])); o.update({k: v for k, v in yaml.safe_load(open(sys.argv[2])).items()})
-yaml.safe_dump(o, open(sys.argv[3], "w"))
+import json, sys, yaml
+o = yaml.safe_load(open(sys.argv[1])); o.update(yaml.safe_load(open(sys.argv[2])))
+json.dump(o, open(sys.argv[3], "w"))
 EOF
   py vars "$OUT/layers/neg-order.yaml" "$OUT/layers/neg.vars.yaml" || bad "vars $(basename "$f")"
   harness "$OUT/layers/order.layer" "$OUT/layers/neg.vars.yaml" "$OUT/layers/neg.order.yaml"
-  negative "$f" helm template zot-abc123 "$INSTANCE" --kube-version 1.30.0 -f "$OUT/layers/site.yaml" -f "$OUT/layers/neg.order.yaml"
+  # Файл пробы правит переменные заказа, а не values экземпляра: слоем значений он не ложится.
+  refuses "$f" helm template zot-abc123 "$INSTANCE" --kube-version 1.30.0 -f "$OUT/layers/site.yaml" -f "$OUT/layers/neg.order.yaml"
 done
 [ "$n" -gt 0 ] || bad "negative: no negative probes found"
 
