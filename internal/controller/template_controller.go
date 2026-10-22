@@ -122,7 +122,10 @@ func (r *ObservedTemplateReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{}, r.dropFinalizer(ctx, obj)
 	}
 	if !controllerutil.ContainsFinalizer(obj, registryv1alpha1.InUseFinalizer) {
-		patch := client.MergeFrom(obj.DeepCopyObject().(client.Object))
+		// Финализаторы — массив, merge patch заменяет его целиком: патч
+		// ставится и снимается под версией объекта (как у заказа), иначе он
+		// стёр бы чужой финализатор либо вернул снятый. Конфликт — повтор.
+		patch := client.MergeFromWithOptions(obj.DeepCopyObject().(client.Object), client.MergeFromWithOptimisticLock{})
 		controllerutil.AddFinalizer(obj, registryv1alpha1.InUseFinalizer)
 		if err := r.Patch(ctx, obj, patch); err != nil {
 			return ctrl.Result{}, err
@@ -179,7 +182,7 @@ func (r *ObservedTemplateReconciler) dropFinalizer(ctx context.Context, obj obse
 	if !controllerutil.ContainsFinalizer(obj, registryv1alpha1.InUseFinalizer) {
 		return nil
 	}
-	patch := client.MergeFrom(obj.DeepCopyObject().(client.Object))
+	patch := client.MergeFromWithOptions(obj.DeepCopyObject().(client.Object), client.MergeFromWithOptimisticLock{})
 	controllerutil.RemoveFinalizer(obj, registryv1alpha1.InUseFinalizer)
 	return client.IgnoreNotFound(r.Patch(ctx, obj, patch))
 }
@@ -228,14 +231,14 @@ func (r *RegistryTemplateReconciler) Reconcile(ctx context.Context, req ctrl.Req
 			return ctrl.Result{}, r.setAccepted(ctx, rt, false, ReasonTemplateInUse, fmt.Sprintf("referenced by Registry %s/%s", u.Namespace, u.Name))
 		}
 		if controllerutil.ContainsFinalizer(rt, registryv1alpha1.InUseFinalizer) {
-			patch := client.MergeFrom(rt.DeepCopy())
+			patch := client.MergeFromWithOptions(rt.DeepCopy(), client.MergeFromWithOptimisticLock{})
 			controllerutil.RemoveFinalizer(rt, registryv1alpha1.InUseFinalizer)
 			return ctrl.Result{}, client.IgnoreNotFound(r.Patch(ctx, rt, patch))
 		}
 		return ctrl.Result{}, nil
 	}
 	if !controllerutil.ContainsFinalizer(rt, registryv1alpha1.InUseFinalizer) {
-		patch := client.MergeFrom(rt.DeepCopy())
+		patch := client.MergeFromWithOptions(rt.DeepCopy(), client.MergeFromWithOptimisticLock{})
 		controllerutil.AddFinalizer(rt, registryv1alpha1.InUseFinalizer)
 		if err := r.Patch(ctx, rt, patch); err != nil {
 			return ctrl.Result{}, err

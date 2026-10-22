@@ -13,7 +13,6 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"slices"
 	"strings"
 )
 
@@ -66,10 +65,6 @@ type SecretsPolicy struct {
 type IdentityPolicy struct {
 	// AllowedRoles — роли, которые выдача вправе называть для учётки заказа.
 	AllowedRoles []string `json:"allowedRoles"`
-	// SystemClassRoles — роли, которые вправе получать системный класс
-	// anonymous, и только на публичном заказе (spec.public): только
-	// публичное чтение. Класс authenticated не получает ничего.
-	SystemClassRoles []string `json:"systemClassRoles,omitempty"`
 	// TargetType — тип ресурса цели выдачи: registry.registries.
 	TargetType string `json:"targetType"`
 	// KeyDeliveryApp — приложение доставки ключа робота в Vault.
@@ -175,7 +170,7 @@ func (c *Config) Validate() error {
 	if len(i.AllowedRoles) == 0 {
 		add("identity.allowedRoles must not be empty")
 	}
-	for _, r := range append(slices.Clone(i.AllowedRoles), i.SystemClassRoles...) {
+	for _, r := range i.AllowedRoles {
 		if !roleName.MatchString(r) {
 			add("identity: role %q is not a role name", r)
 		}

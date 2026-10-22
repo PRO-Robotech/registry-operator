@@ -128,7 +128,7 @@ func TestValidate_EachRefusalHasALawfulTwin(t *testing.T) {
 		}, "spec.subjects[0].serviceAccountRef.name"},
 		{"binding gives pusher to anonymous", kinds.IamAccessBinding, "access", func(u *unstructured.Unstructured) {
 			set(t, u, []any{map[string]any{"systemClass": map[string]any{"name": "anonymous"}}}, "spec", "subjects")
-		}, "spec.roleRef.name"},
+		}, "spec.subjects[0]: a system class is never granted"},
 		{"binding on the account scope", kinds.IamAccessBinding, "access", func(u *unstructured.Unstructured) { set(t, u, "iam.account", "spec", "scope", "type") }, "spec.scope.type"},
 		{"binding with expiry", kinds.IamAccessBinding, "access", func(u *unstructured.Unstructured) { set(t, u, "2030-01-01T00:00:00Z", "spec", "expiresAt") }, "spec"},
 

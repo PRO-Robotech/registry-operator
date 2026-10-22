@@ -97,8 +97,7 @@ func run() error {
 
 	proxy, err := iamproxy.New(iamproxy.Options{
 		RegistryID: cfg.RegistryID, Public: cfg.Public, Upstream: upstream,
-		Verifier: verifier, Checker: checker, Enroller: enroller,
-		Realm: cfg.Realm, Service: cfg.Service, Log: log,
+		Verifier: verifier, Checker: checker, Enroller: enroller, Log: log,
 		Decisions: func(action, outcome string) { decisions.WithLabelValues(action, outcome).Inc() },
 	})
 	if err != nil {

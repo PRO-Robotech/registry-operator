@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -147,21 +146,14 @@ func (v *Verifier) Verify(ctx context.Context, raw string) (Identity, error) {
 	return Identity{Subject: sub, Token: raw}, nil
 }
 
-// subjectOf — субъект IAM токена: вид и идентификатор принципала kaname;
-// без них — по виду идентификатора sub (sva… — учётка, usr… — человек).
-// Идентификатор с разделителями модели прав субъектом не становится.
+// subjectOf — субъект IAM токена: вид и идентификатор принципала kaname,
+// те же утверждения, по которым kaname называет вызывающего на своём API.
+// Токен без них kaname не примет, и прокси не выводит субъекта из sub:
+// аутентификация одна на API и на прокси. Идентификатор с разделителями
+// модели прав субъектом не становится.
 func subjectOf(c jwt.MapClaims) (string, bool) {
 	typ, _ := c[claimPrincipalType].(string)
 	id, _ := c[claimPrincipalID].(string)
-	if typ == "" && id == "" {
-		sub, _ := c["sub"].(string)
-		switch {
-		case strings.HasPrefix(sub, "sva"):
-			typ, id = "service_account", sub
-		case strings.HasPrefix(sub, "usr"):
-			typ, id = "user", sub
-		}
-	}
 	if (typ != "user" && typ != "service_account") || !kaname.ValidID(id) {
 		return "", false
 	}

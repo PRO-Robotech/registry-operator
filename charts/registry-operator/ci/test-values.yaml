@@ -20,8 +20,6 @@ config:
       allowedRoles:
       - registry.pusher
       - registry.puller
-      systemClassRoles:
-      - registry.public.read
       targetType: registry.registries
       keyDeliveryApp: docker-registry
       maxKeyTTLSeconds: 7776000

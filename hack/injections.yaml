@@ -127,18 +127,12 @@ injections:
     new: "if err != nil {"
     package: ./internal/iamproxy/
     tests: [TestCachedChecker_KeyIsTheTokenAndWritesBypass, TestProxy_PushOfANewRepositoryStartsWithBlobChecks]
-  - name: system-class-authenticated-accepted
+  - name: system-class-granted
     file: internal/policy/validate.go
-    old: "case sub.SystemClass.Name != \"anonymous\":"
-    new: "case sub.SystemClass.Name != \"anonymous\" && sub.SystemClass.Name != \"authenticated\":"
+    old: "\t\tcase sub.SystemClass != nil:\n"
+    new: "\t\tcase sub.SystemClass != nil && false:\n"
     package: ./internal/policy/
-    tests: [TestValidate_SystemClassFollowsThePublicityOfTheOrder]
-  - name: anonymous-grant-on-a-private-order
-    file: internal/policy/validate.go
-    old: "case !o.Public:"
-    new: "case false:"
-    package: ./internal/policy/
-    tests: [TestValidate_SystemClassFollowsThePublicityOfTheOrder]
+    tests: [TestValidate_SystemClassIsNeverGranted]
   - name: token-checks-accounted-for-all-sources-at-once
     file: internal/enroll/server.go
     old: "if !s.sources.allow(sourceOf(req)) {"
@@ -235,3 +229,57 @@ injections:
     new: "if false {"
     package: ./internal/iamproxy/
     tests: [TestReadiness_NeedsTheKeySetAndAReadyZot]
+  - name: basic-password-is-not-a-token
+    file: internal/iamproxy/proxy.go
+    old: "if _, password, ok := r.BasicAuth(); ok {"
+    new: "if _, password, ok := r.BasicAuth(); ok && false {"
+    package: ./internal/iamproxy/
+    tests: [TestProxy_RightsTable, TestProxy_VersionCheck]
+  - name: challenge-for-a-token-issuance
+    file: internal/iamproxy/proxy.go
+    old: "const challenge = `Basic realm=\"registry\"`"
+    new: "const challenge = `Bearer realm=\"registry\"`"
+    package: ./internal/iamproxy/
+    tests: [TestProxy_AnonymousAccess, TestProxy_VersionCheck, TestProxy_RefusesInvalidTokens]
+  - name: subject-taken-from-sub
+    file: internal/iamproxy/token.go
+    old: "\tid, _ := c[claimPrincipalID].(string)\n"
+    new: "\tid, _ := c[claimPrincipalID].(string)\n\tif typ == \"\" && id == \"\" {\n\t\ttyp, id = \"service_account\", fmt.Sprint(c[\"sub\"])\n\t}\n"
+    package: ./internal/iamproxy/
+    tests: [TestProxy_RefusesInvalidTokens]
+  - name: token-issuance-flag-understood
+    file: internal/iamproxy/config.go
+    old: "\tfs.DurationVar(&c.EnrollTimeout, \"enroll-timeout\""
+    new: "\tfs.String(\"realm\", \"\", \"\")\n\tfs.DurationVar(&c.EnrollTimeout, \"enroll-timeout\""
+    package: ./internal/iamproxy/
+    tests: [TestConfig_NoTokenIssuanceFlags]
+  - name: observed-template-finalizer-added-without-the-version
+    file: internal/controller/template_controller.go
+    old: "\t\tpatch := client.MergeFromWithOptions(obj.DeepCopyObject().(client.Object), client.MergeFromWithOptimisticLock{})\n\t\tcontrollerutil.AddFinalizer(obj,"
+    new: "\t\tpatch := client.MergeFrom(obj.DeepCopyObject().(client.Object))\n\t\tcontrollerutil.AddFinalizer(obj,"
+    package: ./internal/controller/
+    tests: [TestTemplateFinalizer_AddingKeepsAForeignFinalizer]
+  - name: observed-template-finalizer-dropped-without-the-version
+    file: internal/controller/template_controller.go
+    old: "\tpatch := client.MergeFromWithOptions(obj.DeepCopyObject().(client.Object), client.MergeFromWithOptimisticLock{})\n\tcontrollerutil.RemoveFinalizer(obj,"
+    new: "\tpatch := client.MergeFrom(obj.DeepCopyObject().(client.Object))\n\tcontrollerutil.RemoveFinalizer(obj,"
+    package: ./internal/controller/
+    tests: [TestTemplateFinalizer_DroppingDoesNotResurrectARemovedFinalizer]
+  - name: registry-template-finalizer-dropped-without-the-version
+    file: internal/controller/template_controller.go
+    old: "\t\t\tpatch := client.MergeFromWithOptions(rt.DeepCopy(), client.MergeFromWithOptimisticLock{})\n\t\t\tcontrollerutil.RemoveFinalizer(rt,"
+    new: "\t\t\tpatch := client.MergeFrom(rt.DeepCopy())\n\t\t\tcontrollerutil.RemoveFinalizer(rt,"
+    package: ./internal/controller/
+    tests: [TestTemplateFinalizer_DroppingDoesNotResurrectARemovedFinalizer]
+  - name: registry-template-finalizer-added-without-the-version
+    file: internal/controller/template_controller.go
+    old: "\t\tpatch := client.MergeFromWithOptions(rt.DeepCopy(), client.MergeFromWithOptimisticLock{})\n\t\tcontrollerutil.AddFinalizer(rt,"
+    new: "\t\tpatch := client.MergeFrom(rt.DeepCopy())\n\t\tcontrollerutil.AddFinalizer(rt,"
+    package: ./internal/controller/
+    tests: [TestTemplateFinalizer_AddingKeepsAForeignFinalizer]
+  - name: stop-leaves-compensations-running-uncounted
+    file: internal/enroll/server.go
+    old: "\ts.haltCancel()\n\t<-done\n"
+    new: ""
+    package: ./internal/enroll/
+    tests: [TestEnroll_StopAbandonsARunningCompensationWithItsAccount]

@@ -1,18 +1,23 @@
 name: integration-kaname
 
-# Оператор и iam-proxy против НАСТОЯЩЕГО kaname (стенд чартом в kind, по
-# образцу интеграционного прогона kaname-iam-operator).
+# iam-proxy и регистрация оператора против НАСТОЯЩЕГО kaname (стенд чартом в
+# kind, stand-chart.sh клона kaname).
 #
-# Ревизия kaname — ветка, в которой публичный Check принимает докер-токен
-# регистри для вопроса «о себе» (утверждения принципала и acr при выпуске);
-# её имя — переменная репозитория REGOP_IT_KANAME_BRANCH. Образ —
-# prorobotech/kaname:<ветка>-<sha8 головы>, его публикует конвейер kaname.
-# Манифест модуля registry — charts/registry-platform этого дерева.
+# Ревизия kaname закреплена: образ prorobotech/kaname:main-93ad1b88 — обычный
+# токен kaname (служебной учётки и человека) несёт принципала и acr, и тот же
+# токен годен для API и для iam-proxy. Исходник той же ревизии даёт скрипты
+# стенда и посевы (человек полосы входа, его церемония).
 #
-# Пока любого из трёх условий нет (ветка не названа, образа нет, манифеста
-# нет), прогон НЕ ВЫПОЛНИЛСЯ: шаг называет недостающее аннотацией и
-# завершается отказом — это не зелёный и не вердикт о дереве. Код 75 стенда
-# и it-kaname.sh — то же «условие не создано».
+# Манифест модуля registry — charts/registry-platform/files/registry.manifest.yaml
+# ЭТОГО дерева. Пока чарт площадки живёт в ветке полосы чарта и в дерево не
+# сведён, манифест берётся из ветки REGOP_IT_MANIFEST_REF этого же
+# репозитория; дерево, в котором манифест есть, при названной ветке —
+# отказ: подмена, которой нечего подменять, снимается вместе с REGOP_IT_MANIFEST_REF.
+#
+# Условие не создано (нет образа, манифеста, стенда, посева) — прогон НЕ
+# ВЫПОЛНИЛСЯ: шаг называет недостающее аннотацией и завершается отказом — это
+# не зелёный и не вердикт о дереве. Код 75 стенда и it-kaname.sh — то же
+# «условие не создано».
 
 on:
   push:
@@ -30,9 +35,12 @@ jobs:
   kaname:
     name: real kaname (kind, chart)
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 90
     env:
-      KANAME_BRANCH: ${{ vars.REGOP_IT_KANAME_BRANCH }}
+      KANAME_REF: 93ad1b885469c79f284b9fc629f86fe3dde81a97
+      KANAME_IMAGE: prorobotech/kaname:main-93ad1b88
+      REGOP_IT_MANIFEST_REF: 4-chart
+      MANIFEST_PATH: charts/registry-platform/files/registry.manifest.yaml
       KANAME_STAND_ALERT_RULES: "off"
       KANAME_STAND_CLUSTER: regop-it-kaname
       KANAME_STAND_SKIP_BUILD: "1"
@@ -41,35 +49,38 @@ jobs:
       REGOP_IT_RELEASE: kaname
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Conditions (kaname branch, its image, the module manifest)
+      - name: Conditions (kaname image, the module manifest)
         id: cond
         run: |
           missing=""
-          [ -s charts/registry-platform/files/registry.manifest.yaml ] \
-            || missing="$missing; no registry module manifest in charts/registry-platform"
-          if [ -z "$KANAME_BRANCH" ]; then
-            missing="$missing; repository variable REGOP_IT_KANAME_BRANCH is not set"
-          else
-            sha=$(git ls-remote https://github.com/PRO-Robotech/kaname "refs/heads/$KANAME_BRANCH" | cut -c1-40)
-            if [ -z "$sha" ]; then
-              missing="$missing; kaname branch $KANAME_BRANCH does not exist"
-            else
-              image="prorobotech/kaname:$(echo "$KANAME_BRANCH" | sed 's#/#-#g')-${sha::8}"
-              docker manifest inspect "$image" >/dev/null 2>&1 || missing="$missing; image $image is not published"
-              echo "sha=$sha" >> "$GITHUB_OUTPUT"
-              echo "image=$image" >> "$GITHUB_OUTPUT"
+          docker manifest inspect "$KANAME_IMAGE" >/dev/null 2>&1 || missing="$missing; image $KANAME_IMAGE is not published"
+          manifest="$RUNNER_TEMP/registry.manifest.yaml"
+          if [ -s "$MANIFEST_PATH" ]; then
+            if [ -n "$REGOP_IT_MANIFEST_REF" ]; then
+              echo "::error title=EXPIRED::$MANIFEST_PATH is in this tree; REGOP_IT_MANIFEST_REF=$REGOP_IT_MANIFEST_REF has nothing to substitute — remove it"
+              exit 1
             fi
+            cp "$MANIFEST_PATH" "$manifest"
+            echo "manifest: this tree"
+          elif [ -n "$REGOP_IT_MANIFEST_REF" ] && git fetch -q origin "$REGOP_IT_MANIFEST_REF" \
+              && git show "FETCH_HEAD:$MANIFEST_PATH" > "$manifest" 2>/dev/null && [ -s "$manifest" ]; then
+            echo "manifest: $REGOP_IT_MANIFEST_REF @ $(git rev-parse FETCH_HEAD)"
+          else
+            missing="$missing; no registry module manifest in this tree nor in ${REGOP_IT_MANIFEST_REF:-<no ref>}"
           fi
           if [ -n "$missing" ]; then
             echo "::error title=NOT EXECUTED::${missing#; } — no verdict about the tree"
             exit 1
           fi
+          echo "REGOP_IT_MANIFEST=$manifest" >> "$GITHUB_ENV"
 
       - uses: actions/checkout@v4
         with:
           repository: PRO-Robotech/kaname
-          ref: ${{ steps.cond.outputs.sha }}
+          ref: ${{ env.KANAME_REF }}
           path: .kaname-src
 
       - uses: actions/setup-go@v5
@@ -86,17 +97,24 @@ jobs:
           echo "KUBECONFIG=$RUNNER_TEMP/kaname-stand.kubeconfig" >> "$GITHUB_ENV"
           echo "REGOP_IT_KUBECONFIG=$RUNNER_TEMP/kaname-stand.kubeconfig" >> "$GITHUB_ENV"
           echo "REGOP_IT_CA_DIR=$RUNNER_TEMP/kaname-stand/pki" >> "$GITHUB_ENV"
+          echo "REGOP_IT_CEREMONY_ENV=$GITHUB_WORKSPACE/.kaname-src/tests/newman/environments/local.postman_environment.json" >> "$GITHUB_ENV"
 
       - name: Tools
         run: |
-          go install sigs.k8s.io/kind@v0.33.0
+          rc=0
+          go install sigs.k8s.io/kind@v0.33.0 || rc=$?
+          go install github.com/fullstorydev/grpcurl/cmd/grpcurl@v1.9.3 || rc=$?
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
-          pip install --quiet pyyaml==6.0.2
+          pip install --quiet pyyaml==6.0.2 || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "::error title=NOT EXECUTED::tools are not installed (rc=$rc) — no verdict about the tree"
+            exit 1
+          fi
 
-      - name: kaname image of the branch
+      - name: kaname image
         run: |
-          docker pull "${{ steps.cond.outputs.image }}"
-          echo "KANAME_STAND_IMAGE=${{ steps.cond.outputs.image }}" >> "$GITHUB_ENV"
+          docker pull "$KANAME_IMAGE"
+          echo "KANAME_STAND_IMAGE=$KANAME_IMAGE" >> "$GITHUB_ENV"
 
       - name: kaname stand up
         timeout-minutes: 30
@@ -110,23 +128,36 @@ jobs:
             *) exit "$rc" ;;
           esac
 
-      - name: Human of the login lane
+      - name: The registry module manifest of this tree is delivered
         timeout-minutes: 10
-        working-directory: .kaname-src
         run: |
           rc=0
-          .github/scripts/stand-chart.sh seed-login-lane || rc=$?
+          hack/it-kaname.sh deliver || rc=$?
           case "$rc" in
             0) ;;
-            75) echo "::error title=NOT EXECUTED::the login-lane human was not seeded — no verdict about the tree"; exit 1 ;;
+            75) echo "::error title=NOT EXECUTED::the manifest was not delivered — no verdict about the tree"; exit 1 ;;
             *) exit "$rc" ;;
           esac
+
+      - name: Human of the login lane and its ceremony token
+        timeout-minutes: 15
+        working-directory: .kaname-src
+        run: |
+          for cmd in seed-login-lane seed-ceremony; do
+            rc=0
+            .github/scripts/stand-chart.sh "$cmd" || rc=$?
+            case "$rc" in
+              0) ;;
+              75) echo "::error title=NOT EXECUTED::$cmd did not create its condition — no verdict about the tree"; exit 1 ;;
+              *) echo "::error title=NOT EXECUTED::$cmd was refused by kaname (rc=$rc) — the stand seed, not this tree"; exit 1 ;;
+            esac
+          done
 
       - name: Probe against the stand
         timeout-minutes: 25
         run: |
           rc=0
-          hack/it-kaname.sh > "$RUNNER_TEMP/kanameit.log" 2>&1 || rc=$?
+          hack/it-kaname.sh probe > "$RUNNER_TEMP/kanameit.log" 2>&1 || rc=$?
           cat "$RUNNER_TEMP/kanameit.log"
           echo "kanameit rc=$rc"
           case "$rc" in

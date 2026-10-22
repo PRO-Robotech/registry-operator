@@ -116,6 +116,11 @@ type Server struct {
 	sources *sourceLimiter
 	// pending — идущие компенсации (Drain ждёт их при остановке).
 	pending sync.WaitGroup
+	// halt — обрыв идущих компенсаций, когда срок остановки истёк раньше
+	// их срока: каждая сама считает исход abandoned.
+	haltOnce   sync.Once
+	halt       context.Context
+	haltCancel context.CancelFunc
 }
 
 // Учёт проверок токенов по источнику: темп и запас одного адреса, предел
@@ -145,7 +150,17 @@ func (s *Server) Handler() http.Handler {
 	return s.mux
 }
 
-// Drain ждёт идущих компенсаций либо конца ctx (остановка процесса).
+// haltContext — контекст обрыва компенсаций (заводится при первом
+// обращении).
+func (s *Server) haltContext() context.Context {
+	s.haltOnce.Do(func() { s.halt, s.haltCancel = context.WithCancel(context.Background()) })
+	return s.halt
+}
+
+// Drain ждёт идущих компенсаций. Срок остановки (ctx) короче срока
+// компенсации: истёк он раньше — идущие компенсации обрываются, каждая
+// считает и пишет в журнал исход abandoned, и Drain возвращается после их
+// учёта, а не оставляет их умирать вместе с процессом молча.
 func (s *Server) Drain(ctx context.Context) error {
 	done := make(chan struct{})
 	go func() {
@@ -156,8 +171,11 @@ func (s *Server) Drain(ctx context.Context) error {
 	case <-done:
 		return nil
 	case <-ctx.Done():
-		return ctx.Err()
 	}
+	s.haltContext()
+	s.haltCancel()
+	<-done
+	return ctx.Err()
 }
 
 // sourceLimiter — учёт проверок токенов по адресу источника.
@@ -432,11 +450,13 @@ func (s *Server) register(ctx context.Context, reg *registryv1alpha1.Registry, s
 // начала снятия регистри. Попытки идут вне запроса (ответ заявке их не
 // ждёт), в контексте без отмены запроса, с отступом, пока IAM не ответит
 // либо не истечёт срок; отказ по существу не повторяется. Drain ждёт их при
-// остановке.
+// остановке и обрывает с учётом, когда срок остановки истёк раньше.
 func (s *Server) compensate(parent context.Context, repo kaname.Registration) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), compensationBudget)
+	unhalt := context.AfterFunc(s.haltContext(), cancel)
 	s.pending.Go(func() {
 		defer cancel()
+		defer unhalt()
 		delay := compensationFirstDelay
 		for attempt := 1; ; attempt++ {
 			actx, acancel := context.WithTimeout(ctx, s.Limits.RequestTimeout)

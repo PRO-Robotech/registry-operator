@@ -191,7 +191,7 @@ func newEnv(t *testing.T, public bool) *env {
 	enr := &enroller{fake: fake, clock: ck, by: map[string]string{}, at: map[string]time.Time{}}
 	p, err := iamproxy.New(iamproxy.Options{
 		RegistryID: regID, Public: public, Upstream: u, Verifier: verifier, Checker: checker, Enroller: enr,
-		Realm: "https://registry.example.test/iam/token", Service: "registry", Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -716,7 +716,7 @@ func TestProxy_UnavailableIAMIsNotAnAllow(t *testing.T) {
 		Checker: checkerFunc(func(context.Context, iamproxy.Identity, string, string) (bool, error) {
 			return false, iamproxy.ErrCheckUnavailable
 		}),
-		Enroller: e.enr, Realm: "r", Service: "registry", Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Enroller: e.enr, Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -733,7 +733,7 @@ func TestProxy_UnavailableIAMIsNotAnAllow(t *testing.T) {
 func TestNew_UpstreamOutsideThePodIsRefused(t *testing.T) {
 	_, err := iamproxy.New(iamproxy.Options{
 		RegistryID: regID, Upstream: &url.URL{Scheme: "http", Host: "zot.other-ns.svc:5000"},
-		Verifier: verifierFunc(nil), Checker: checkerFunc(nil), Enroller: &enroller{}, Realm: "r", Service: "s",
+		Verifier: verifierFunc(nil), Checker: checkerFunc(nil), Enroller: &enroller{},
 	})
 	if err == nil {
 		t.Fatal("an upstream off the loopback was accepted")
@@ -767,7 +767,7 @@ func TestProxy_UpstreamDownIsAFixedBadGateway(t *testing.T) {
 			return iamproxy.Identity{Subject: "service_account:sva1", Token: tok}, nil
 		}),
 		Checker:  checkerFunc(func(context.Context, iamproxy.Identity, string, string) (bool, error) { return true, nil }),
-		Enroller: &enroller{}, Realm: "r", Service: "registry", Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Enroller: &enroller{}, Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	if err != nil {
 		t.Fatal(err)

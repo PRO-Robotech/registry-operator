@@ -33,6 +33,8 @@ type Config struct {
 	JWKSURL    string
 	JWKSCAFile string
 	Issuer     string
+	// Audience — аудитория публичного API kaname: прокси принимает тот же
+	// токен, что и API.
 	Audience   string
 	TokenTypes string
 
@@ -46,9 +48,6 @@ type Config struct {
 	EnrollCAFile    string
 	EnrollTokenFile string
 	EnrollTimeout   time.Duration
-
-	Realm   string
-	Service string
 }
 
 // MaxCacheTTL — предел срока кэша вердиктов: отзыв права чтения действует
@@ -66,7 +65,7 @@ func (c *Config) BindFlags(fs *flag.FlagSet) {
 	fs.StringVar(&c.JWKSURL, "jwks-url", "", "https URL of the issuer key set")
 	fs.StringVar(&c.JWKSCAFile, "jwks-ca", "", "CA bundle the key set is served under")
 	fs.StringVar(&c.Issuer, "issuer", "", "token issuer")
-	fs.StringVar(&c.Audience, "audience", "", "token audience of the registry")
+	fs.StringVar(&c.Audience, "audience", "", "token audience of the public API of kaname")
 	fs.StringVar(&c.TokenTypes, "token-types", "at+jwt", "comma-separated accepted typ headers")
 	fs.StringVar(&c.KanameAddress, "kaname-address", "", "host:port of the public gRPC of kaname")
 	fs.StringVar(&c.KanameServerName, "kaname-server-name", "", "server name in the kaname certificate")
@@ -77,8 +76,6 @@ func (c *Config) BindFlags(fs *flag.FlagSet) {
 	fs.StringVar(&c.EnrollCAFile, "enroll-ca", "", "CA bundle of the enrollment endpoint")
 	fs.StringVar(&c.EnrollTokenFile, "enroll-token-file", "", "projected token of the pod account with the operator audience")
 	fs.DurationVar(&c.EnrollTimeout, "enroll-timeout", 15*time.Second, "deadline of one enrollment")
-	fs.StringVar(&c.Realm, "realm", "", "token realm announced to clients")
-	fs.StringVar(&c.Service, "service", "", "token service announced to clients")
 }
 
 // Validate — fail-closed проверка конфигурации.
@@ -120,9 +117,6 @@ func (c *Config) Validate() error {
 	}
 	if c.EnrollTimeout <= 0 || c.EnrollTimeout > time.Minute {
 		add("enroll-timeout must be within (0, 1m]")
-	}
-	if c.Realm == "" || c.Service == "" {
-		add("realm and service are required")
 	}
 	return errors.Join(errs...)
 }

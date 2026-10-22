@@ -4,8 +4,12 @@
 // Package iamproxy — прокси прав перед zot одного регистри. zot остаётся
 // неизменным и без собственной аутентификации слушает только localhost
 // пода; прокси решает каждый запрос протокола Distribution правом IAM:
-//   - токен клиента проверяется локально (JWKS издателя только по https с
-//     объявленным центром, издатель, аудитория, обязательный срок, тип);
+//   - токен клиента — обычный токен kaname, тот же, что для API (служебной
+//     учётки либо человека): Bearer либо паролем схемы Basic (docker login,
+//     имя любое); выдачи своего токена у прокси нет, клиенту без кредов —
+//     вызов Basic. Токен проверяется локально (JWKS издателя только по https
+//     с объявленным центром, издатель, аудитория публичного API kaname,
+//     обязательный срок, тип, утверждения принципала);
 //   - право спрашивается публичным AuthorizeService.Check kaname ТОКЕНОМ
 //     САМОГО КЛИЕНТА о нём самом — своих прав у прокси нет, общей служебной
 //     личности нет, спросить о чужом праве он не может;
@@ -52,9 +56,6 @@ type Options struct {
 	Verifier TokenVerifier
 	Checker  Checker
 	Enroller Enroller
-	// Realm и Service — вызов клиента за токеном (WWW-Authenticate).
-	Realm   string
-	Service string
 	// UpstreamTimeout — ожидание заголовков ответа zot.
 	UpstreamTimeout time.Duration
 	Log             *slog.Logger
@@ -93,8 +94,6 @@ func New(o Options) (*Proxy, error) {
 		return nil, errors.New("upstream must be zot over http on the loopback of the pod")
 	case o.Verifier == nil || o.Checker == nil || o.Enroller == nil:
 		return nil, errors.New("verifier, checker and enroller are required")
-	case o.Realm == "" || o.Service == "":
-		return nil, errors.New("realm and service are required")
 	}
 	if o.Log == nil {
 		o.Log = slog.Default()
@@ -174,10 +173,16 @@ const (
 	apiVersion       = "registry/2.0"
 )
 
+// challenge — вызов клиенту без годных кредов: войти паролем схемы Basic,
+// которым служит тот же токен kaname, что и для API. Области в вызове нет:
+// выдачи токена по области у прокси нет, право решает Check на каждом
+// запросе.
+const challenge = `Basic realm="registry"`
+
 // versionCheck — проверка версии протокола (GET и HEAD /v2/): отвечает сам
 // прокси, zot её не видит. Анониму частного регистри и негодному токену —
-// 401 с вызовом за токеном без области: клиент проверяет учётные данные
-// при входе, а не на первом запросе к репозиторию.
+// 401 с вызовом Basic: клиент проверяет учётные данные при входе, а не на
+// первом запросе к репозиторию.
 func (p *Proxy) versionCheck(w http.ResponseWriter, r *http.Request) {
 	id, v := p.identity(r)
 	if v == allow && id == nil && !p.o.Public {
@@ -195,8 +200,7 @@ func (p *Proxy) versionCheck(w http.ResponseWriter, r *http.Request) {
 	case unavailable:
 		writeError(w, http.StatusServiceUnavailable, "UNAVAILABLE", "authorization is unavailable, retry later", "")
 	default:
-		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "authentication required",
-			fmt.Sprintf(`Bearer realm=%q,service=%q`, p.o.Realm, p.o.Service))
+		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "authentication required", challenge)
 	}
 }
 
@@ -236,7 +240,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p.count(rt, v.String())
 	switch v {
 	case unauthenticated:
-		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "authentication required", p.challenge(rt))
+		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "authentication required", challenge)
 		return
 	case denied:
 		writeError(w, http.StatusForbidden, "DENIED", "requested access to the resource is denied", "")
@@ -266,26 +270,14 @@ func (p *Proxy) count(rt Route, outcome string) {
 	}
 }
 
-func (p *Proxy) challenge(rt Route) string {
-	scope := "pull"
-	switch rt.Action {
-	case ActionPush:
-		scope = "pull,push"
-	case ActionDelete:
-		scope = "delete"
-	}
-	return fmt.Sprintf(`Bearer realm=%q,service=%q,scope="repository:%s/%s:%s"`, p.o.Realm, p.o.Service, p.o.RegistryID, rt.Repository, scope)
-}
-
 // identity — личность запроса: (nil, unauthenticated) у отвергнутого
 // токена; (nil, allow) у запроса без токена.
 func (p *Proxy) identity(r *http.Request) (*Identity, verdict) {
-	h := r.Header.Get("Authorization")
-	if h == "" {
+	if r.Header.Get("Authorization") == "" {
 		return nil, allow
 	}
-	raw, ok := strings.CutPrefix(h, "Bearer ")
-	if !ok || raw == "" {
+	raw, ok := presentedToken(r)
+	if !ok {
 		return nil, unauthenticated
 	}
 	id, err := p.o.Verifier.Verify(r.Context(), raw)
@@ -297,6 +289,20 @@ func (p *Proxy) identity(r *http.Request) (*Identity, verdict) {
 		return nil, unauthenticated
 	}
 	return &id, allow
+}
+
+// presentedToken — токен kaname из Authorization: Bearer <токен> либо
+// Basic, где паролем служит токен, а имя пользователя не значит ничего
+// (docker login требует непустое имя). Иная схема, неразборчивый Basic и
+// пустой токен — не токен.
+func presentedToken(r *http.Request) (string, bool) {
+	if raw, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
+		return raw, raw != ""
+	}
+	if _, password, ok := r.BasicAuth(); ok {
+		return password, password != ""
+	}
+	return "", false
 }
 
 // decide — решение по запросу. Второе значение — сохранить ли

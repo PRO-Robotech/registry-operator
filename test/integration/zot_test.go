@@ -177,7 +177,7 @@ func TestProxyInFrontOfZot_PushAndPullThroughRights(t *testing.T) {
 		RegistryID: regID, Upstream: upstream, Verifier: verifier,
 		Checker:  &iamproxy.CachedChecker{Inner: iamproxy.NewKanameChecker(conn, 5*time.Second), TTL: 10 * time.Second, MaxEntries: 64, Now: time.Now},
 		Enroller: &enroller{fake: fake, by: map[string]string{}},
-		Realm:    "https://registry.example.test/iam/token", Service: "registry", Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Log:      slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	if err != nil {
 		t.Fatal(err)

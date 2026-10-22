@@ -466,33 +466,22 @@ func (c *Config) checkAccessBinding(v *Violations, o Order, u *unstructured.Unst
 	if len(s.Subjects) == 0 || len(s.Subjects) > 2 {
 		v.add("spec.subjects", "must hold one or two subjects")
 	}
-	systemClass := false
 	for i, sub := range s.Subjects {
 		f := fmt.Sprintf("spec.subjects[%d]", i)
 		switch {
-		case sub.ServiceAccountRef != nil && sub.SystemClass == nil:
-			if sub.ServiceAccountRef.Name != o.ServiceAccountName {
-				v.add(f+".serviceAccountRef.name", "must be the order service account %q", o.ServiceAccountName)
-			}
-		case sub.SystemClass != nil && sub.ServiceAccountRef == nil:
-			systemClass = true
-			// Системный класс — подстановка «любой»: законен только аноним и
-			// только на публичном заказе. authenticated открыл бы частный
-			// регистри каждому вошедшему субъекту любого арендатора.
-			switch {
-			case sub.SystemClass.Name != "anonymous":
-				v.add(f+".systemClass.name", "must be anonymous: a grant to every authenticated subject opens the registry to all tenants")
-			case !o.Public:
-				v.add(f+".systemClass.name", "anonymous may hold a role only on a public registry (spec.public)")
-			}
-		default:
-			v.add(f, "must be exactly one of serviceAccountRef or systemClass")
+		case sub.SystemClass != nil:
+			// Системный класс — подстановка «любой». Публичность регистри —
+			// один механизм, флаг --public прокси из spec.public; выдача
+			// anonymous или authenticated была бы вторым, и authenticated
+			// открыл бы частный регистри каждому вошедшему субъекту.
+			v.add(f, "a system class is never granted: a public registry is served by the proxy flag from spec.public")
+		case sub.ServiceAccountRef == nil:
+			v.add(f, "must name the order service account")
+		case sub.ServiceAccountRef.Name != o.ServiceAccountName:
+			v.add(f+".serviceAccountRef.name", "must be the order service account %q", o.ServiceAccountName)
 		}
 	}
-	switch {
-	case systemClass && !slices.Contains(p.SystemClassRoles, s.RoleRef.Name):
-		v.add("spec.roleRef.name", "a system class may hold only %v", p.SystemClassRoles)
-	case !systemClass && !slices.Contains(p.AllowedRoles, s.RoleRef.Name):
+	if !slices.Contains(p.AllowedRoles, s.RoleRef.Name) {
 		v.add("spec.roleRef.name", "must be one of %v", p.AllowedRoles)
 	}
 	if s.Scope != nil && s.Scope.Type != "" && s.Scope.Type != "iam.project" {
