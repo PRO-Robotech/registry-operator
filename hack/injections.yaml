@@ -103,3 +103,21 @@ injections:
     new: "if false {"
     package: ./internal/controller/
     tests: [TestPipeline_ProjectComesFromTheNamespaceAndIsPinned]
+  - name: escaped-path-proxied
+    file: internal/iamproxy/route.go
+    old: "if r.URL.RawPath != \"\" {"
+    new: "if false {"
+    package: ./internal/iamproxy/
+    tests: [TestParse_EscapedPathIsNotProxied]
+  - name: unconfirmed-repository-holds-the-registry
+    file: internal/controller/registration.go
+    old: "\tp.registration = &registryv1alpha1.RegistrationStatus{Object: obj, Ready: true, Reason: registryv1alpha1.ReasonRegistered}\n\tmetrics.Registrations"
+    new: "\tif !allRepositoriesRegistered(p.reservation) {\n\t\treturn false, nil\n\t}\n\tp.registration = &registryv1alpha1.RegistrationStatus{Object: obj, Ready: true, Reason: registryv1alpha1.ReasonRegistered}\n\tmetrics.Registrations"
+    package: ./internal/controller/
+    tests: [TestPipeline_UnconfirmedRepositoryDoesNotHoldTheRegistry]
+  - name: rbac-writes-secrets
+    file: charts/registry-operator/files/role.yaml
+    old: "  resources:\n  - namespaces\n  verbs:\n  - get\n"
+    new: "  resources:\n  - namespaces\n  - secrets\n  verbs:\n  - create\n  - get\n"
+    package: ./internal/kinds/
+    tests: [TestClusterRole_WritesOnlyTheSixKinds]

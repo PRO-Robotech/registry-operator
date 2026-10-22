@@ -16,8 +16,10 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 
+	observedv1alpha1 "github.com/PRO-Robotech/registry-operator/api/observed/v1alpha1"
 	registryv1alpha1 "github.com/PRO-Robotech/registry-operator/api/v1alpha1"
 	"github.com/PRO-Robotech/registry-operator/internal/kaname"
+	"github.com/PRO-Robotech/registry-operator/internal/samples"
 )
 
 const wait = 30 * time.Second
@@ -411,4 +413,121 @@ func addRepository(t *testing.T, reg *registryv1alpha1.Registry, repo string) {
 		kaname.Scope{Project: rec.Project, Account: rec.Account}, kaname.Version(reg.CreationTimestamp.Time, reg.Generation))); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// Репозиторий описи, чья регистрация не подтверждена (IAM отвергает
+// именно его), шаг регистрации регистри не держит: стадия 2 открывается,
+// повтор по репозиторию виден в диагностике резерва.
+func TestPipeline_UnconfirmedRepositoryDoesNotHoldTheRegistry(t *testing.T) {
+	const ns, id = "pipe06", "pipe06a"
+	tenant(t, ns, "prj06", "acc06")
+	kn.Refuse(kaname.RepositoryObject(id, "team/broken"))
+	order(t, ns, id, nil)
+	ch := children(ns, id)
+	eventually(t, wait, "registered", func() error { return registeredInIAM(id, "prj06") })
+	eventually(t, 10*time.Second, "ledger entry", func() error {
+		res := reservation(t, id)
+		res.Status.Repositories = append(res.Status.Repositories, registryv1alpha1.RegisteredRepository{
+			Name: "team/broken", EnrolledBy: "service_account:sva1", EnrolledAt: metav1.Now(),
+		})
+		return k8s.Status().Update(ctx(), res)
+	})
+	for _, s := range []registryv1alpha1.Step{registryv1alpha1.StepStorage, registryv1alpha1.StepSecrets, registryv1alpha1.StepIdentity} {
+		eventually(t, wait, "stage one", func() error { return exists(ch[s]) })
+		markReady(t, ch[s])
+	}
+	eventually(t, wait, "stage two opens", func() error { return exists(ch[registryv1alpha1.StepAccess]) })
+	eventually(t, wait, "the repository retry is visible", func() error {
+		d := reservation(t, id).Status.Diagnostics
+		if d == nil {
+			return fmt.Errorf("no diagnostics")
+		}
+		for _, r := range d.Resources {
+			if r.Name == kaname.RepositoryObject(id, "team/broken") {
+				return nil
+			}
+		}
+		return fmt.Errorf("diagnostics %+v", d.Resources)
+	})
+}
+
+// Ревизия шаблона с запрещённой функцией не принимается; законный
+// близнец (та же ревизия без неё) — принимается.
+func TestTemplates_ForbiddenFunctionIsNotAccepted(t *testing.T) {
+	mk := func(name, value string) *observedv1alpha1.ObservedS3BucketClaimTemplate {
+		return &observedv1alpha1.ObservedS3BucketClaimTemplate{
+			ObjectMeta: metav1.ObjectMeta{Name: name + "-v1"},
+			Spec: observedv1alpha1.ObservedS3BucketClaimTemplateSpec{TemplateBody: observedv1alpha1.TemplateBody{
+				TemplateName: name, Version: "v1", Value: value,
+			}},
+		}
+	}
+	bad := mk("bad-s3", "customerLogin: {{ env \"HOME\" | toJson }}\n")
+	twin := mk("twin-s3", "customerLogin: {{ .Login | toJson }}\n")
+	for _, o := range []*observedv1alpha1.ObservedS3BucketClaimTemplate{bad, twin} {
+		if err := k8s.Create(ctx(), o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	accepted := func(name string) (metav1.ConditionStatus, error) {
+		o := &observedv1alpha1.ObservedS3BucketClaimTemplate{}
+		if err := k8s.Get(ctx(), types.NamespacedName{Name: name}, o); err != nil {
+			return "", err
+		}
+		for _, c := range o.Status.Conditions {
+			if c.Type == registryv1alpha1.ConditionAccepted && c.ObservedGeneration == o.Generation {
+				return c.Status, nil
+			}
+		}
+		return "", fmt.Errorf("no Accepted condition on %s", name)
+	}
+	eventually(t, wait, "forbidden function refused", func() error {
+		s, err := accepted(bad.Name)
+		if err != nil || s != metav1.ConditionFalse {
+			return fmt.Errorf("Accepted %q %v", s, err)
+		}
+		return nil
+	})
+	eventually(t, wait, "twin accepted", func() error {
+		s, err := accepted(twin.Name)
+		if err != nil || s != metav1.ConditionTrue {
+			return fmt.Errorf("Accepted %q %v", s, err)
+		}
+		return nil
+	})
+}
+
+// Ревизия шаблона заказа, на которую ссылается заказ, не удаляется, пока
+// ссылка жива.
+func TestTemplates_RevisionInUseIsKept(t *testing.T) {
+	const ns, id = "pipe07", "pipe07a"
+	tenant(t, ns, "prj07", "acc07")
+	set, err := samples.Load(samplesDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := set.RegistryTemplate.DeepCopy()
+	rt.ObjectMeta = metav1.ObjectMeta{Name: "zot-v2"}
+	rt.Spec.Version = "v2"
+	if err := k8s.Create(ctx(), rt); err != nil {
+		t.Fatal(err)
+	}
+	order(t, ns, id, func(r *registryv1alpha1.Registry) { r.Spec.TemplateRef.Version = "v2" })
+	eventually(t, wait, "finalizer on the revision", func() error {
+		cur := &registryv1alpha1.RegistryTemplate{}
+		if err := k8s.Get(ctx(), types.NamespacedName{Name: "zot-v2"}, cur); err != nil {
+			return err
+		}
+		if !slices.Contains(cur.Finalizers, registryv1alpha1.InUseFinalizer) {
+			return fmt.Errorf("finalizers %v", cur.Finalizers)
+		}
+		return nil
+	})
+	if err := k8s.Delete(ctx(), rt); err != nil {
+		t.Fatal(err)
+	}
+	consistently(t, 2*time.Second, "revision in use is kept", func() error {
+		cur := &registryv1alpha1.RegistryTemplate{}
+		return k8s.Get(ctx(), types.NamespacedName{Name: "zot-v2"}, cur)
+	})
 }

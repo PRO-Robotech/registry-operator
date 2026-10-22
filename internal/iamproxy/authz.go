@@ -93,9 +93,11 @@ func (k *KanameChecker) Check(ctx context.Context, id Identity, verb, object str
 	}
 }
 
-// CachedChecker — кэш вердиктов чтения: ключ — хэш токена, объект и
+// CachedChecker — кэш разрешений чтения: ключ — хэш токена, объект и
 // глагол, срок не больше TTL. Глаголы записи идут мимо кэша: отзыв права
-// на запись действует со следующего запроса.
+// на запись действует со следующего запроса. Отказы не кэшируются: новая
+// выдача и только что записанный репозиторий видны со следующего запроса,
+// а отказ ничего не стоит переспросить.
 type CachedChecker struct {
 	Inner Checker
 	TTL   time.Duration
@@ -130,7 +132,7 @@ func (c *CachedChecker) Check(ctx context.Context, id Identity, verb, object str
 	}
 	c.mu.Unlock()
 	allowed, err := c.Inner.Check(ctx, id, verb, object)
-	if err != nil {
+	if err != nil || !allowed {
 		return false, err
 	}
 	c.mu.Lock()
@@ -138,6 +140,6 @@ func (c *CachedChecker) Check(ctx context.Context, id Identity, verb, object str
 	if c.entries == nil || len(c.entries) >= c.MaxEntries {
 		c.entries = map[string]cached{}
 	}
-	c.entries[key] = cached{allowed: allowed, until: now.Add(c.TTL)}
-	return allowed, nil
+	c.entries[key] = cached{allowed: true, until: now.Add(c.TTL)}
+	return true, nil
 }

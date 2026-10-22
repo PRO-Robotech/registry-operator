@@ -488,6 +488,22 @@ func TestProxy_TokenKanameDoesNotAuthenticateIsNotAnAllow(t *testing.T) {
 	}
 }
 
+// Готовность — по набору ключей издателя: недоступный набор — не готов.
+func TestVerifier_ReadyOnlyWithTheKeySet(t *testing.T) {
+	down := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusBadGateway) }))
+	defer down.Close()
+	v, err := iamproxy.NewVerifier(iamproxy.TokenConfig{
+		JWKSURL: down.URL, HTTPClient: down.Client(), Issuer: issuer, Audience: aud,
+		Algorithms: []string{"ES256"}, Types: []string{"at+jwt"}, KeysTTL: time.Minute,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.Ready(context.Background()) {
+		t.Fatal("ready without a key set")
+	}
+}
+
 func TestNewVerifier_RefusesAPlaintextKeySet(t *testing.T) {
 	_, err := iamproxy.NewVerifier(iamproxy.TokenConfig{
 		JWKSURL: "http://iam.example.test/jwks", HTTPClient: http.DefaultClient, Issuer: issuer, Audience: aud,

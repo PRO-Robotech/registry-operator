@@ -100,19 +100,21 @@ func (r *RegistryReconciler) ensureRegistration(ctx context.Context, p *pass, sc
 	if err := r.retryRepositories(ctx, p, scope); err != nil {
 		return false, err
 	}
-	now := metav1.NewTime(p.now)
-	res, err = r.reservations().Mutate(ctx, reg.Spec.ID, func(res *registryv1alpha1.RegistryIDReservation) error {
-		if err := ownReservation(res, reg); err != nil {
-			return err
+	if !fresh {
+		now := metav1.NewTime(p.now)
+		res, err = r.reservations().Mutate(ctx, reg.Spec.ID, func(res *registryv1alpha1.RegistryIDReservation) error {
+			if err := ownReservation(res, reg); err != nil {
+				return err
+			}
+			res.Status.Registration.Generation = reg.Generation
+			res.Status.Registration.RegisteredAt = &now
+			return nil
+		})
+		if err != nil {
+			return false, err
 		}
-		res.Status.Registration.Generation = reg.Generation
-		res.Status.Registration.RegisteredAt = &now
-		return nil
-	})
-	if err != nil {
-		return false, err
+		p.reservation = res
 	}
-	p.reservation = res
 	// Неподтверждённый репозиторий описи шаг не держит: регистри записан, а
 	// повтор по репозиторию идёт каждым проходом и виден в диагностике.
 	p.registration = &registryv1alpha1.RegistrationStatus{Object: obj, Ready: true, Reason: registryv1alpha1.ReasonRegistered}

@@ -151,6 +151,28 @@ func subjectOf(c jwt.MapClaims) (string, bool) {
 	return typ + ":" + id, true
 }
 
+// Ready — набор ключей издателя получен хотя бы раз; пока нет — попытка
+// получить его (не чаще RefreshEvery). Прокси без ключей не проверит ни
+// одного токена, и под не должен принимать трафик.
+func (v *Verifier) Ready(ctx context.Context) bool {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.keys != nil {
+		return true
+	}
+	now := v.cfg.Now()
+	if now.Sub(v.forcedAt) < v.cfg.RefreshEvery {
+		return false
+	}
+	v.forcedAt = now
+	keys, err := v.fetch(ctx)
+	if err != nil {
+		return false
+	}
+	v.keys, v.fetchedAt = keys, now
+	return true
+}
+
 // errKeyNotPublished — набор ключей получен, но такого kid в нём нет:
 // порок токена, а не недоступность издателя.
 var errKeyNotPublished = errors.New("key is not published by the issuer")

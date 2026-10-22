@@ -61,4 +61,14 @@ func TestCachedChecker_KeyIsTheTokenAndWritesBypass(t *testing.T) {
 	if inner.calls != 26 {
 		t.Fatalf("calls %d", inner.calls)
 	}
+	// Отказ не кэшируется: выдача, пришедшая следом, видна сразу.
+	inner.allowed = false
+	fresh := iamproxy.Identity{Subject: "user:usr2", Token: "t-c"}
+	if ok, _ := c.Check(context.Background(), fresh, iamproxy.VerbGet, obj); ok {
+		t.Fatal("denied check answered allowed")
+	}
+	inner.allowed = true
+	if ok, _ := c.Check(context.Background(), fresh, iamproxy.VerbGet, obj); !ok {
+		t.Fatal("a cached denial outlived the grant")
+	}
 }

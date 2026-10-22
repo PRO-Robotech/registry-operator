@@ -106,7 +106,13 @@ func run() error {
 
 	health := http.NewServeMux()
 	health.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	health.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	health.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		if !verifier.Ready(r.Context()) {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
 	health.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 
 	servers := []*http.Server{
