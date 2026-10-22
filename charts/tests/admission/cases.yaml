@@ -215,6 +215,9 @@ cases:
   - {name: v1-stranger-binds-user-under-another-name, policy: v1-registry-iam, as: stranger, verb: create, expect: allow, object: *binding, rename: pull-team, set: {spec.subjects: [{user: {id: usr01}}]}}
   - {name: v1-platform-binds-robot-under-another-name, policy: v1-registry-iam, as: platform, verb: create, expect: allow, object: *binding, rename: pull-all}
   - {name: v1-stranger-binds-authenticated-to-another-module, policy: v1-registry-iam, as: stranger, verb: create, expect: allow, object: *binding, rename: pull-all, set: {metadata.namespace: cust02, spec.subjects: [{systemClass: {name: authenticated}}], spec.roleRef.name: vpc.viewer, spec.target.resources: [{type: vpc.networks, id: net01}]}}
+  # Отрицательный близнец законного выше: меняется один факт — цель registry.registries при роли
+  # другого модуля. Запирает ветку цели V1: без неё выдачу ловили бы лишь имя и роль registry.*.
+  - {name: v1-stranger-binds-authenticated-to-a-registry-with-another-module-role, policy: v1-registry-iam, as: stranger, verb: create, expect: deny, object: *binding, rename: pull-all, set: {metadata.namespace: cust02, spec.subjects: [{systemClass: {name: authenticated}}], spec.roleRef.name: vpc.viewer, spec.target.resources: [{type: registry.registries, id: abc123}]}}
   # V3 — маршрут заказа.
   - {name: v3-stranger-creates-route, policy: v3-registry-route, as: stranger, verb: create, expect: deny, object: *route}
   - {name: v3-operator-routes-foreign-path, policy: v3-registry-route, as: operator, verb: create, expect: deny, object: *route, set: {spec.rules: [{matches: [{path: {type: PathPrefix, value: /v2/xyz789/}}], backendRefs: [{group: "", kind: Service, name: zot-abc123, namespace: cust01, port: 8080}]}]}}

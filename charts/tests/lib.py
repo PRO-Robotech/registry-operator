@@ -198,6 +198,7 @@ def cmd_probe_instance(render, site_file, vars_file, probes_on):
             "--jwks-ca": ca,
             "--issuer": site["kaname"]["issuer"],
             "--audience": site["kaname"]["audience"],
+            "--token-types": "at+jwt",
             "--kaname-url": site["kaname"].get("url"),
             "--kaname-ca": ca,
             "--check-timeout": site["iamProxy"].get("checkTimeout"),

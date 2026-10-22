@@ -77,6 +77,7 @@ Argo CD.
 | `--jwks-ca=<путь>` | CA площадки, под которым отдаётся набор ключей |
 | `--issuer=<iss>` | `iss` принимаемых токенов |
 | `--audience=<aud>` | `aud` принимаемых токенов |
+| `--token-types=at+jwt` | `typ` принимаемых токенов — только токен доступа kaname (`at+jwt`). Значение постоянное, ручки площадки нет: иной тип открыл бы прокси токенам другого назначения того же издателя |
 | `--kaname-url=<https://host[:port]>` | публичный REST-фронт kaname (`AuthorizeService.Check`, `POST /iam/v1/authorize:check`), без пути; `:9091` схема отвергает |
 | `--kaname-ca=<путь>` | CA площадки для kaname |
 | `--check-timeout=<1s…30s>` | дедлайн одного Check |
