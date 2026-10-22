@@ -170,7 +170,7 @@ jobs:
         if: failure() && steps.cond.outcome == 'success'
         run: |
           kubectl --context "$REGOP_IT_CONTEXT" -n kaname get pods -o wide || true
-          kubectl --context "$REGOP_IT_CONTEXT" -n kaname logs -l app.kubernetes.io/name=kaname --tail=200 --all-containers || true
+          kubectl --context "$REGOP_IT_CONTEXT" -n kaname logs -l app=kaname --tail=200 --all-containers --prefix || true
 
       - name: kaname stand down
         if: always() && steps.cond.outcome == 'success'

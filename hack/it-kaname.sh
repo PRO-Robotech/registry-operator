@@ -87,7 +87,16 @@ EOF
 )
 	"${K[@]}" patch deploy "$REL" --type=strategic -p "$patch" >/dev/null || unmet "deployment $REL is not patched"
 	if ! "${K[@]}" rollout status deploy "$REL" --timeout=300s; then
-		"${K[@]}" logs "deploy/$REL" --tail=80 >&2 || true
+		# «Прежний под ждёт снятия» при одной реплике значит, что НОВЫЙ под не
+		# готов: журнал нужен его, а не прежнего (deploy/ берёт любой).
+		"${K[@]}" get pods -l "app=$REL" -o wide >&2 || true
+		local pod
+		for pod in $("${K[@]}" get pods -l "app=$REL" -o 'jsonpath={.items[*].metadata.name}'); do
+			printf -- '--- %s\n' "$pod" >&2
+			"${K[@]}" get pod "$pod" -o 'jsonpath={range .status.containerStatuses[*]}{.name} ready={.ready} restarts={.restartCount} {.state}{"\n"}{end}' >&2 || true
+			"${K[@]}" logs "$pod" --all-containers --tail=60 >&2 || true
+			"${K[@]}" logs "$pod" --all-containers --previous --tail=60 >&2 2>/dev/null || true
+		done
 		printf 'it-kaname: FINDING: kaname did not come up with the registry module manifest of this tree\n' >&2
 		exit 1
 	fi
