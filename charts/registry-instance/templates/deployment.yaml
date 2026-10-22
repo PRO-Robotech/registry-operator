@@ -102,6 +102,7 @@ spec:
             - {{ printf "--jwks-ca=%s" $caPath | toJson }}
             - {{ printf "--issuer=%s" .Values.site.kaname.issuer | toJson }}
             - {{ printf "--audience=%s" .Values.site.kaname.audience | toJson }}
+            - --token-types=at+jwt
             - {{ printf "--kaname-url=%s" .Values.site.kaname.url | toJson }}
             - {{ printf "--kaname-ca=%s" $caPath | toJson }}
             - {{ printf "--check-timeout=%s" .Values.site.iamProxy.checkTimeout | toJson }}

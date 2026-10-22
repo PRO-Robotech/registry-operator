@@ -166,6 +166,7 @@ spec:
             - "--jwks-ca=/etc/registry/ca/ca.crt"
             - "--issuer=https://kaname.example.test"
             - "--audience=registry"
+            - --token-types=at+jwt
             - "--kaname-url=https://kaname.example.test:8443"
             - "--kaname-ca=/etc/registry/ca/ca.crt"
             - "--check-timeout=2s"
