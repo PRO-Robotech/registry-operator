@@ -93,15 +93,16 @@ type Fake struct {
 	tokens  map[string]string
 	checks  int
 
-	allowedSAN string
-	failNext   []codes.Code
-	refuse     map[string]bool
+	allowedSAN  string
+	failNext    []codes.Code
+	refuse      map[string]bool
+	unavailable map[string]bool
 }
 
 // New — двойник; allowedSAN — URI SAN листа, которому разрешена запись
 // (spiffe://<td>/ns/<ns>/sa/kacho-registry).
 func New(allowedSAN string) *Fake {
-	return &Fake{objects: map[string]Object{}, tokens: map[string]string{}, refuse: map[string]bool{}, allowedSAN: allowedSAN}
+	return &Fake{objects: map[string]Object{}, tokens: map[string]string{}, refuse: map[string]bool{}, unavailable: map[string]bool{}, allowedSAN: allowedSAN}
 }
 
 // FailNext — следующие вызовы внутреннего листенера получат эти коды.
@@ -116,6 +117,14 @@ func (f *Fake) Refuse(object string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.refuse[object] = true
+}
+
+// SetUnavailable — регистрация объекта отвечает Unavailable, пока флаг
+// не снят.
+func (f *Fake) SetUnavailable(object string, on bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.unavailable[object] = on
 }
 
 // Objects — снимок зеркала.
@@ -229,6 +238,9 @@ func (f *Fake) applyRegister(req *iamv1.RegisterResourceRequest) (*iamv1.Registe
 	}
 	if f.refuse[req.GetObject()] {
 		return nil, status.Error(codes.InvalidArgument, "refused")
+	}
+	if f.unavailable[req.GetObject()] {
+		return nil, status.Error(codes.Unavailable, "unavailable")
 	}
 	f.calls = append(f.calls, Call{Method: "Register", Object: req.GetObject(), Chain: slices.Clone(req.GetParentChain())})
 	v := versionOf(req.GetSourceVersion())
@@ -384,11 +396,16 @@ func (s *Servers) Stop() { s.stop() }
 // Serve поднимает оба листенера на localhost: внутренний требует лист
 // центра clientCA, публичный — только TLS сервера.
 func (f *Fake) Serve(serverCert tls.Certificate, clientCA *x509.CertPool) (*Servers, error) {
-	internalLn, err := net.Listen("tcp", "127.0.0.1:0")
+	return f.ServeOn(serverCert, clientCA, "127.0.0.1:0", "127.0.0.1:0")
+}
+
+// ServeOn — то же на заданных адресах.
+func (f *Fake) ServeOn(serverCert tls.Certificate, clientCA *x509.CertPool, internalAddr, publicAddr string) (*Servers, error) {
+	internalLn, err := net.Listen("tcp", internalAddr)
 	if err != nil {
 		return nil, err
 	}
-	publicLn, err := net.Listen("tcp", "127.0.0.1:0")
+	publicLn, err := net.Listen("tcp", publicAddr)
 	if err != nil {
 		_ = internalLn.Close()
 		return nil, err

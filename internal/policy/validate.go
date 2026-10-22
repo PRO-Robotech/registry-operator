@@ -103,9 +103,9 @@ func CheckRendered(k kinds.Kind, rendered map[string]any) error {
 	return refuseOperatorKeys(k.GVK.Kind, rendered, keys)
 }
 
-// Validate проверяет итоговый объект (после полей оператора) против
+// Check проверяет итоговый объект (после полей оператора) против
 // политики. Возвращает все нарушения разом (*Violations) либо nil.
-func (c *Config) Validate(k kinds.Kind, o Order, u *unstructured.Unstructured) error {
+func (c *Config) Check(k kinds.Kind, o Order, u *unstructured.Unstructured) error {
 	v := &Violations{Kind: k.GVK.Kind}
 	if u.GetAPIVersion() != k.GVK.GroupVersion().String() || u.GetKind() != k.GVK.Kind {
 		v.add("kind", "object is %s %s, the step writes %s", u.GetAPIVersion(), u.GetKind(), k.GVK)

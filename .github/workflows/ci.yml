@@ -46,6 +46,17 @@ jobs:
           name: test-log
           path: test.log
 
+  injections:
+    name: every probe can fail (injection table)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: pip install --quiet pyyaml==6.0.2
+      - run: make inject
+
   lint:
     name: golangci-lint
     runs-on: ubuntu-latest

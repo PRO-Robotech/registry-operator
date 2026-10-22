@@ -164,12 +164,12 @@ func TestValidate_EachRefusalHasALawfulTwin(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			twin := goldenObject(t, c.step)
-			if err := cfg.Policy.Validate(c.kind, order(), twin); err != nil {
+			if err := cfg.Policy.Check(c.kind, order(), twin); err != nil {
 				t.Fatalf("lawful twin refused: %v", err)
 			}
 			bad := goldenObject(t, c.step)
 			c.edit(bad)
-			err := cfg.Policy.Validate(c.kind, order(), bad)
+			err := cfg.Policy.Check(c.kind, order(), bad)
 			if err == nil {
 				t.Fatal("policy accepted the forbidden object")
 			}
@@ -184,14 +184,14 @@ func TestValidate_EachRefusalHasALawfulTwin(t *testing.T) {
 func TestValidate_VaultClaimBindsExactlyTheWorkloadAccount(t *testing.T) {
 	cfg := sampleConfig(t)
 	u := goldenObject(t, "secrets")
-	if err := cfg.Policy.Validate(kinds.VaultClaim, order(), u); err != nil {
+	if err := cfg.Policy.Check(kinds.VaultClaim, order(), u); err != nil {
 		t.Fatalf("names[] with the workload account refused: %v", err)
 	}
 	roles, _, _ := unstructured.NestedSlice(u.Object, "spec", "roles")
 	r := roles[0].(map[string]any)
 	r["boundServiceAccounts"] = map[string]any{"names": []any{"zot-abc123", "default"}, "namespace": "cust01"}
 	set(t, u, []any{r}, "spec", "roles")
-	err := cfg.Policy.Validate(kinds.VaultClaim, order(), u)
+	err := cfg.Policy.Check(kinds.VaultClaim, order(), u)
 	if err == nil || !strings.Contains(err.Error(), "spec.roles[0].boundServiceAccounts.names:") {
 		t.Fatalf("names[] with a second account accepted: %v", err)
 	}
@@ -204,7 +204,7 @@ func TestValidate_SystemClassHoldsOnlyThePublicReadRole(t *testing.T) {
 	u := goldenObject(t, "access")
 	set(t, u, []any{map[string]any{"systemClass": map[string]any{"name": "anonymous"}}}, "spec", "subjects")
 	set(t, u, "registry.public.read", "spec", "roleRef", "name")
-	if err := cfg.Policy.Validate(kinds.IamAccessBinding, order(), u); err != nil {
+	if err := cfg.Policy.Check(kinds.IamAccessBinding, order(), u); err != nil {
 		t.Fatalf("public read for anonymous refused: %v", err)
 	}
 }
@@ -215,7 +215,7 @@ func TestValidate_ChartPinOutsideThePlatformList(t *testing.T) {
 	o.Chart.Version = "1.0.1"
 	u := goldenObject(t, "workload")
 	set(t, u, "1.0.1", "spec", "version")
-	if err := cfg.Policy.Validate(kinds.Addon, o, u); err == nil || !strings.Contains(err.Error(), "not an allowed platform pin") {
+	if err := cfg.Policy.Check(kinds.Addon, o, u); err == nil || !strings.Contains(err.Error(), "not an allowed platform pin") {
 		t.Fatalf("unpinned chart version accepted: %v", err)
 	}
 }

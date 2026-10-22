@@ -1,0 +1,105 @@
+# Таблица инъекций (hack/inject.py): дефект в прод-коде → проба, которая
+# обязана на нём покраснеть; контроль — та же проба на неправленом дереве.
+injections:
+  - name: vault-claim-moved-to-stage-two
+    file: internal/kinds/kinds.go
+    old: "{S3BucketClaim, VaultClaim, IamServiceAccount},\n\t{IamAccessBinding, Addon},"
+    new: "{S3BucketClaim, IamServiceAccount},\n\t{VaultClaim, IamAccessBinding, Addon},"
+    package: ./internal/kinds/
+    tests: [TestStages_FirstStageIsTheParallelSetOfTheFinalForm]
+  - name: registration-removed-after-the-account
+    file: internal/kinds/kinds.go
+    old: "\t{Registration: true},\n\t{Kind: IamServiceAccount},"
+    new: "\t{Kind: IamServiceAccount},\n\t{Registration: true},"
+    package: ./internal/kinds/
+    tests: [TestDeletionOrder_IsThePipelineReversed]
+  - name: empty-parent-chain-sent
+    file: internal/kaname/kaname.go
+    old: "if len(r.ParentChain) == 0 {"
+    new: "if false {"
+    package: ./internal/kaname/
+    tests: [TestRegister_EmptyParentChainIsNeverSent]
+  - name: permission-denied-read-as-unavailable
+    file: internal/kaname/client.go
+    old: "case codes.InvalidArgument, codes.PermissionDenied,"
+    new: "case codes.InvalidArgument,"
+    package: ./internal/kaname/
+    tests: [TestRegister_RefusalAndUnavailabilityAreTwoOutcomes, TestRegister_LeafOfAnotherServiceIsRefused]
+  - name: enrollment-by-any-account-of-the-tenant
+    file: internal/enroll/server.go
+    old: "if !kaname.ValidID(id) || sa != s.WorkloadName(id) {"
+    new: "if !kaname.ValidID(id) || sa == \"\" {"
+    package: ./internal/enroll/
+    tests: [TestEnroll_OnlyTheWorkloadAccountOfThisRegistryMayEnroll]
+  - name: enrollment-without-a-limit
+    file: internal/enroll/server.go
+    old: "if len(res.Status.Repositories) >= s.Limits.MaxRepositories {"
+    new: "if false {"
+    package: ./internal/enroll/
+    tests: [TestEnroll_RepositoryLimitAndRate]
+  - name: registered-repository-opened-for-any-subject
+    file: internal/enroll/server.go
+    old: "if r.EnrolledBy == body.Subject && now.Sub(r.EnrolledAt.Time) < s.Limits.EnrollerGrace {"
+    new: "if true {"
+    package: ./internal/enroll/
+    tests: [TestEnroll_RegisteredRepositoryIsNotNewForAnotherSubject]
+  - name: write-verdicts-cached
+    file: internal/iamproxy/authz.go
+    old: "return verb == VerbGet || verb == VerbList }"
+    new: "return verb != \"\" }"
+    package: ./internal/iamproxy/
+    tests: [TestProxy_RevocationAfterTheCacheTTL]
+  - name: public-registry-accepts-anonymous-push
+    file: internal/iamproxy/proxy.go
+    old: "if read && p.o.Public {"
+    new: "if p.o.Public {"
+    package: ./internal/iamproxy/
+    tests: [TestProxy_AnonymousAccess]
+  - name: client-credentials-forwarded-to-zot
+    file: internal/iamproxy/proxy.go
+    old: "[]string{\"Authorization\", \"Cookie\", \"Proxy-Authorization\", \"Forwarded\","
+    new: "[]string{\"Forwarded\","
+    package: ./internal/iamproxy/
+    tests: [TestProxy_Hygiene]
+  - name: zot-failure-bodies-forwarded
+    file: internal/iamproxy/proxy.go
+    old: "if resp.StatusCode < 500 && resp.StatusCode != http.StatusUnauthorized {"
+    new: "if true {"
+    package: ./internal/iamproxy/
+    tests: [TestProxy_Hygiene]
+  - name: new-repository-without-the-create-right
+    file: internal/iamproxy/proxy.go
+    old: "if v := p.check(ctx, id, VerbCreate, kaname.RegistryObject(p.o.RegistryID)); v != allow {"
+    new: "if v := allow; v != allow {"
+    package: ./internal/iamproxy/
+    tests: [TestProxy_RightsTable]
+  - name: token-without-expiry-accepted
+    file: internal/iamproxy/token.go
+    old: "\t\tjwt.WithExpirationRequired(),\n"
+    new: ""
+    package: ./internal/iamproxy/
+    tests: [TestProxy_RefusesInvalidTokens]
+  - name: vault-policy-reads-any-leaf
+    file: internal/policy/validate.go
+    old: "if ip.Path != leaf {"
+    new: "if ip.Path == \"\" {"
+    package: ./internal/desired/
+    tests: [TestBuild_RefusesARenderedSpecThatOverstepsThePolicy]
+  - name: foreign-reservation-adopted
+    file: internal/controller/registry_controller.go
+    old: "if res.Spec.RegistryRef.UID != string(reg.UID) || res.Status.Phase == registryv1alpha1.ReservationReleased {"
+    new: "if res.Status.Phase == registryv1alpha1.ReservationReleased {"
+    package: ./internal/controller/
+    tests: [TestPipeline_ReservationOfAnotherOrderIsRefused]
+  - name: stage-two-opened-before-the-registration
+    file: internal/controller/registry_controller.go
+    old: "stageReady = stageReady && ready"
+    new: "stageReady = stageReady || ready"
+    package: ./internal/controller/
+    tests: [TestPipeline_RegistrationGatesStageTwo]
+  - name: project-relabel-moves-the-registry
+    file: internal/controller/registration.go
+    old: "if labeled.Project != rec.Project {"
+    new: "if false {"
+    package: ./internal/controller/
+    tests: [TestPipeline_ProjectComesFromTheNamespaceAndIsPinned]

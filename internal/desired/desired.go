@@ -209,7 +209,7 @@ func Build(k kinds.Kind, tpl observedv1alpha1.Template, in Input) (*unstructured
 		return nil, &PolicyError{Err: fmt.Errorf("kind %s is not rendered from a template", k.GVK)}
 	}
 	u := newObject(k, name, namespace, Labels(in.Registry, in.Template, k.Step), annotations, spec)
-	if err := in.Policy.Validate(k, in.Order(chart), u); err != nil {
+	if err := in.Policy.Check(k, in.Order(chart), u); err != nil {
 		return nil, &PolicyError{Err: err}
 	}
 	return u, nil

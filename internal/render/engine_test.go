@@ -60,7 +60,8 @@ func TestExecute_MissingStatusOfANotReadyStepFails(t *testing.T) {
 }
 
 func TestExecute_IntegersStayIntegers(t *testing.T) {
-	tpl, err := Compile("t", `n: {{ .Registry.SyncEpoch | toJson }}`)
+	// Ключ не «n»: в YAML 1.1 разбора sigs.k8s.io/yaml это булево false.
+	tpl, err := Compile("t", `epoch: {{ .Registry.SyncEpoch | toJson }}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,8 +71,8 @@ func TestExecute_IntegersStayIntegers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v, ok := out["n"].(int64); !ok || v != 7 {
-		t.Fatalf("n = %#v (%T), want int64 7", out["n"], out["n"])
+	if v, ok := out["epoch"].(int64); !ok || v != 7 {
+		t.Fatalf("epoch = %#v (%T), want int64 7", out["epoch"], out["epoch"])
 	}
 }
 

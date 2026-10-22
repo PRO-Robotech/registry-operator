@@ -16,8 +16,6 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 
-	"google.golang.org/grpc/codes"
-
 	registryv1alpha1 "github.com/PRO-Robotech/registry-operator/api/v1alpha1"
 	"github.com/PRO-Robotech/registry-operator/internal/kaname"
 )
@@ -127,13 +125,27 @@ func TestPipeline_StagesOpenInOrderAndReadyIsTheConjunction(t *testing.T) {
 func TestPipeline_RegistrationGatesStageTwo(t *testing.T) {
 	const ns, id = "pipe02", "pipe02a"
 	tenant(t, ns, "prj02", "acc02")
-	kn.FailNext(codes.Unavailable, codes.Unavailable, codes.Unavailable, codes.Unavailable, codes.Unavailable)
+	kn.SetUnavailable(kaname.RegistryObject(id), true)
 	order(t, ns, id, nil)
 	ch := children(ns, id)
 	for _, s := range []registryv1alpha1.Step{registryv1alpha1.StepStorage, registryv1alpha1.StepSecrets, registryv1alpha1.StepIdentity} {
 		eventually(t, wait, "stage one", func() error { return exists(ch[s]) })
 		markReady(t, ch[s])
 	}
+	eventually(t, wait, "registration pending", func() error {
+		reg := registry(t, ns, id)
+		if reg.Status.Registration == nil || reg.Status.Registration.Reason != registryv1alpha1.ReasonRegistrationPending {
+			return fmt.Errorf("registration %+v", reg.Status.Registration)
+		}
+		return nil
+	})
+	consistently(t, 3*time.Second, "stage two waits for the registration", func() error {
+		if err := absent(ch[registryv1alpha1.StepAccess]); err != nil {
+			return err
+		}
+		return absent(ch[registryv1alpha1.StepWorkload])
+	})
+	kn.SetUnavailable(kaname.RegistryObject(id), false)
 	eventually(t, wait, "registration recovers", func() error { return registeredInIAM(id, "prj02") })
 	eventually(t, wait, "stage two after the registration", func() error { return exists(ch[registryv1alpha1.StepAccess]) })
 }

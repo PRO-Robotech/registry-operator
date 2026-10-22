@@ -57,6 +57,11 @@ test: crds $(ENVTEST) ## Unit и envtest (с -race).
 	REGOP_TEST_CRDS="$(LOCALBIN)/crds" \
 	go test -race -count=1 $$(go list ./... | grep -v /test/e2e) -coverprofile cover.out
 
+.PHONY: inject
+inject: crds $(ENVTEST) ## Таблица инъекций: каждая проба способна упасть.
+	KUBEBUILDER_ASSETS="$$("$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" \
+	REGOP_TEST_CRDS="$(LOCALBIN)/crds" python3 hack/inject.py
+
 .PHONY: lint
 lint: $(GOLANGCI_LINT) ## golangci-lint.
 	"$(GOLANGCI_LINT)" run ./...

@@ -21,6 +21,7 @@ import (
 
 	registryv1alpha1 "github.com/PRO-Robotech/registry-operator/api/v1alpha1"
 	"github.com/PRO-Robotech/registry-operator/internal/kinds"
+	"github.com/PRO-Robotech/registry-operator/internal/testkit"
 )
 
 // holdFinalizer — финализатор проб: держит дочерний объект в Terminating,
@@ -137,12 +138,7 @@ func notTerminating(c child) error {
 	return nil
 }
 
-func cond(typ, status string, gen int64) map[string]any {
-	return map[string]any{
-		"type": typ, "status": status, "reason": "Test", "message": "",
-		"lastTransitionTime": metav1.Now().UTC().Format(time.RFC3339), "observedGeneration": gen,
-	}
-}
+func cond(typ, status string, gen int64) map[string]any { return testkit.Cond(typ, status, gen) }
 
 // setStatus — статус объекта, как его вывел бы его контроллер.
 func setStatus(t *testing.T, c child, status func(gen int64) map[string]any) {
@@ -157,44 +153,21 @@ func setStatus(t *testing.T, c child, status func(gen int64) map[string]any) {
 	})
 }
 
+// markReady — статус готового объекта, как его вывел бы его контроллер.
 func markReady(t *testing.T, c child) {
 	t.Helper()
-	switch c.kind.GVK {
-	case kinds.S3BucketClaim.GVK:
-		setStatus(t, c, func(g int64) map[string]any {
-			return map[string]any{"phase": "Ready", "observedGeneration": g, "bucketName": "b-" + c.name, "endpoint": "https://s3.example.test",
-				"conditions": []any{cond("KeysWritten", "True", g), cond("Ready", "True", g)}}
-		})
-	case kinds.VaultClaim.GVK:
-		setStatus(t, c, func(g int64) map[string]any {
-			return map[string]any{"phase": "Ready", "observedGeneration": g, "vault": map[string]any{"authMountPath": "kubernetes-site-a"},
-				"conditions": []any{cond("RolesApplied", "True", g), cond("Ready", "True", g)}}
-		})
-	case kinds.IamServiceAccount.GVK:
-		setStatus(t, c, func(g int64) map[string]any {
-			return map[string]any{"observedGeneration": g, "id": "sva" + c.name[4:10],
-				"conditions": []any{cond("Ready", "True", g), cond("KeysReady", "True", g)}}
-		})
-	case kinds.IamAccessBinding.GVK:
-		setStatus(t, c, func(g int64) map[string]any {
-			return map[string]any{"observedGeneration": g, "id": "acb" + c.name[4:10], "conditions": []any{cond("Ready", "True", g)}}
-		})
-	case kinds.Addon.GVK:
-		setStatus(t, c, func(g int64) map[string]any {
-			return map[string]any{"observedGeneration": g,
-				"conditions": []any{cond("Synced", "True", g), cond("Healthy", "True", g), cond("Ready", "True", g)}}
-		})
-	case kinds.HTTPRoute.GVK:
-		setStatus(t, c, func(g int64) map[string]any {
-			return map[string]any{"parents": []any{map[string]any{
-				"parentRef":      map[string]any{"group": "gateway.networking.k8s.io", "kind": "Gateway", "namespace": "registry-edge", "name": "registry-gw"},
-				"controllerName": "example.test/gateway",
-				"conditions":     []any{cond("Accepted", "True", g), cond("ResolvedRefs", "True", g)},
-			}}}
-		})
-	default:
-		t.Fatalf("no ready status for %s", c.kind.GVK)
-	}
+	eventually(t, 10*time.Second, "ready status of "+c.name, func() error {
+		u, err := get(c)
+		if err != nil {
+			return err
+		}
+		st, ok := testkit.ReadyStatus(u)
+		if !ok {
+			t.Fatalf("no ready status for %s", c.kind.GVK)
+		}
+		u.Object["status"] = st
+		return k8s.Status().Update(ctx(), u)
+	})
 }
 
 // workload — Deployment zot-<id>, как его поставил бы Argo CD.

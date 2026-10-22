@@ -140,7 +140,8 @@ func newEnv(t *testing.T, public bool) *env {
 		t.Fatal(err)
 	}
 	jwks := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		x, y := key.PublicKey.X.FillBytes(make([]byte, 32)), key.PublicKey.Y.FillBytes(make([]byte, 32))
+		pub, _ := key.PublicKey.Bytes()
+		x, y := pub[1:33], pub[33:65]
 		_ = json.NewEncoder(w).Encode(map[string]any{"keys": []any{map[string]string{
 			"kty": "EC", "crv": "P-256", "kid": "k1", "use": "sig", "alg": "ES256",
 			"x": base64.RawURLEncoding.EncodeToString(x), "y": base64.RawURLEncoding.EncodeToString(y),
