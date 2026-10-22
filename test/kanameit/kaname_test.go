@@ -141,6 +141,14 @@ func bootstrap(t *testing.T) *admin {
 	return &admin{t: t, http: client, token: resp.GetAccessToken()}
 }
 
+// with — тот же администратор с отказами в t вызывающего (подтеста):
+// отказ подтеста на t родителя — Goexit не в той горутине.
+func (a *admin) with(t *testing.T) *admin {
+	c := *a
+	c.t = t
+	return &c
+}
+
 // call — запрос REST; тело ответа — JSON-объект.
 func (a *admin) call(method, path string, body any) (int, map[string]any) {
 	a.t.Helper()
@@ -179,6 +187,12 @@ func (a *admin) operation(method, path string, body any, what string) map[string
 	if code != http.StatusOK || id == "" {
 		a.t.Fatalf("%s: %d %v", what, code, op)
 	}
+	return a.await(id, what)
+}
+
+// await — операция до завершения и её ответ.
+func (a *admin) await(id, what string) map[string]any {
+	a.t.Helper()
 	deadline := time.Now().Add(90 * time.Second)
 	for {
 		code, cur := a.call(http.MethodGet, "/operations/"+id, nil)
@@ -402,12 +416,22 @@ func (w *world) onAccount() grantTarget {
 	return grantTarget{"iam.account", w.account, map[string]any{"allInScope": map[string]any{}}}
 }
 
+// grant — выдача; отказ kaname принять выдачу — расхождение таблицы
+// (t.Errorf) и nil: строка таблицы без выдачи не исполняется.
 func (w *world) grant(t *testing.T, s subject, role string, g grantTarget) func() {
 	t.Helper()
-	b := w.adm.operation(http.MethodPost, "/iam/v1/accessBindings", map[string]any{
+	a := w.adm.with(t)
+	what := "grant " + role + " to " + s.principal()
+	code, op := a.call(http.MethodPost, "/iam/v1/accessBindings", map[string]any{
 		"subjectType": s.typ, "subjectId": s.id, "roleId": w.roles[role],
 		"scopeType": g.scopeType, "scopeId": g.scopeID, "target": g.target,
-	}, "grant "+role+" to "+s.principal())
+	})
+	opID, _ := op["id"].(string)
+	if code != http.StatusOK || opID == "" {
+		t.Errorf("%s: kaname refused the grant: %d %v", what, code, op)
+		return nil
+	}
+	b := a.await(opID, what)
 	id := str(b, "id", "grant", t)
 	if b["status"] != "ACTIVE" {
 		t.Fatalf("grant %s is %v, not ACTIVE", id, b["status"])
@@ -416,13 +440,13 @@ func (w *world) grant(t *testing.T, s subject, role string, g grantTarget) func(
 	revoke := func() {
 		if !revoked {
 			revoked = true
-			w.adm.operation(http.MethodDelete, "/iam/v1/accessBindings/"+id, nil, "revoke "+id)
+			a.operation(http.MethodDelete, "/iam/v1/accessBindings/"+id, nil, "revoke "+id)
 		}
 	}
 	t.Cleanup(func() {
 		if !revoked {
 			revoked = true
-			w.adm.call(http.MethodDelete, "/iam/v1/accessBindings/"+id, nil)
+			a.call(http.MethodDelete, "/iam/v1/accessBindings/"+id, nil)
 		}
 	})
 	return revoke
@@ -648,42 +672,46 @@ func TestKaname_RightsTableWithTheOrdinaryToken(t *testing.T) {
 				step{"no grant: push", http.MethodPut, push(w.reg), 403},
 				step{"no grant: new repository", http.MethodPost, fresh(), 403})
 
-			revoke := w.grant(t, s, "registry.puller", w.onRegistry(w.reg))
-			p.expect(t, s, true,
-				step{"puller: pull", http.MethodGet, pull(w.reg), 200},
-				step{"puller: push", http.MethodPut, push(w.reg), 403},
-				step{"puller: new repository", http.MethodPost, fresh(), 403})
-			revoke()
-			p.settled(t, s, pull(w.reg))
-
-			revoke = w.grant(t, s, "registry.pusher", w.onRegistry(w.reg))
-			p.expect(t, s, true,
-				step{"pusher: pull", http.MethodGet, pull(w.reg), 200},
-				step{"pusher: push", http.MethodPut, push(w.reg), 200},
-				step{"pusher: new repository", http.MethodPost, fresh(), 200})
-			foreign.expect(t, s, false,
-				step{"pusher elsewhere: pull from another registry", http.MethodGet, pull(w.other), 403},
-				step{"pusher elsewhere: push to another registry", http.MethodPut, push(w.other), 403})
-			revoke()
-			p.settled(t, s, pull(w.reg))
-
-			revoke = w.grant(t, s, "registry.pusher", w.onRepository(w.reg, "team/app"))
-			p.expect(t, s, true,
-				step{"pusher on the repository: pull", http.MethodGet, pull(w.reg), 200},
-				step{"pusher on the repository: push", http.MethodPut, push(w.reg), 200})
-			p.expect(t, s, false,
-				step{"F3: the registered empty repository", http.MethodPost, empty, 403},
-				step{"pusher on the repository: new repository", http.MethodPost, fresh(), 403})
-			revoke()
-			p.settled(t, s, pull(w.reg))
-
-			revoke = w.grant(t, s, "registry.pusher", w.onAccount())
-			p.expect(t, s, true,
-				step{"pusher on the account (cascade): pull", http.MethodGet, pull(w.reg), 200},
-				step{"pusher on the account (cascade): push", http.MethodPut, push(w.reg), 200},
-				step{"pusher on the account (cascade): new repository", http.MethodPost, fresh(), 200})
-			revoke()
-			p.settled(t, s, pull(w.reg))
+			// row — выдача, её шаги, снятие и ожидание снятия; выдачу,
+			// которую kaname не принял, строка называет и не исполняет.
+			row := func(role string, g grantTarget, steps func()) {
+				revoke := w.grant(t, s, role, g)
+				if revoke == nil {
+					return
+				}
+				steps()
+				revoke()
+				p.settled(t, s, pull(w.reg))
+			}
+			row("registry.puller", w.onRegistry(w.reg), func() {
+				p.expect(t, s, true,
+					step{"puller: pull", http.MethodGet, pull(w.reg), 200},
+					step{"puller: push", http.MethodPut, push(w.reg), 403},
+					step{"puller: new repository", http.MethodPost, fresh(), 403})
+			})
+			row("registry.pusher", w.onRegistry(w.reg), func() {
+				p.expect(t, s, true,
+					step{"pusher: pull", http.MethodGet, pull(w.reg), 200},
+					step{"pusher: push", http.MethodPut, push(w.reg), 200},
+					step{"pusher: new repository", http.MethodPost, fresh(), 200})
+				foreign.expect(t, s, false,
+					step{"pusher elsewhere: pull from another registry", http.MethodGet, pull(w.other), 403},
+					step{"pusher elsewhere: push to another registry", http.MethodPut, push(w.other), 403})
+			})
+			row("registry.pusher", w.onRepository(w.reg, "team/app"), func() {
+				p.expect(t, s, true,
+					step{"pusher on the repository: pull", http.MethodGet, pull(w.reg), 200},
+					step{"pusher on the repository: push", http.MethodPut, push(w.reg), 200})
+				p.expect(t, s, false,
+					step{"F3: the registered empty repository", http.MethodPost, empty, 403},
+					step{"pusher on the repository: new repository", http.MethodPost, fresh(), 403})
+			})
+			row("registry.pusher", w.onAccount(), func() {
+				p.expect(t, s, true,
+					step{"pusher on the account (cascade): pull", http.MethodGet, pull(w.reg), 200},
+					step{"pusher on the account (cascade): push", http.MethodPut, push(w.reg), 200},
+					step{"pusher on the account (cascade): new repository", http.MethodPost, fresh(), 200})
+			})
 		})
 	}
 }
@@ -756,6 +784,9 @@ func TestKaname_RevocationReachesTheProxyWithinTheCacheTTL(t *testing.T) {
 	cached := w.newProxy(t, w.reg, false, iamproxy.MaxCacheTTL)
 	direct := w.newProxy(t, w.reg, false, 0)
 	revoke := w.grant(t, w.sa, "registry.puller", w.onRegistry(w.reg))
+	if revoke == nil {
+		return
+	}
 	cached.expect(t, w.sa, true, step{"puller: pull", http.MethodGet, path, 200})
 
 	revoke()
