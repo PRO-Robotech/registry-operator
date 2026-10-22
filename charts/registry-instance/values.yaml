@@ -91,13 +91,23 @@ site:
     kaname: []
   resources:
     zot:
-      requests: {cpu: 100m, memory: 256Mi}
-      limits: {memory: 1Gi}
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        memory: 1Gi
     sidecar:
-      requests: {cpu: 20m, memory: 32Mi}
-      limits: {memory: 128Mi}
+      requests:
+        cpu: 20m
+        memory: 32Mi
+      limits:
+        memory: 128Mi
     vaultAgent:
-      requests: {cpu: 10m, memory: 32Mi}
-      limits: {cpu: 100m, memory: 64Mi}
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        cpu: 100m
+        memory: 64Mi
     # Временное zot (метаданные, загрузки до выгрузки в S3); данные — только в S3.
     scratchSizeLimit: 2Gi

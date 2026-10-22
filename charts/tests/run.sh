@@ -16,7 +16,7 @@
 # Окружение: SCHEMAS — каталог схем kubeconform (обязателен); UPDATE_GOLDEN=1 —
 # переписать golden (дифф — в выводе); OUT — каталог вывода (по умолчанию
 # charts/tests/out). Код 0 — всё зелёное, 1 — есть красное.
-set -euo pipefail
+set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 T="$ROOT/charts/tests"
@@ -43,16 +43,23 @@ pall="$T/cases/platform-all.yaml"
 # 1. Платформа: lint и рендер по умолчанию и со всем включённым.
 step lint-platform-default helm lint --strict "$PLATFORM" -f "$pdef"
 step lint-platform-all helm lint --strict "$PLATFORM" -f "$pdef" -f "$pall"
-helm template registry-platform "$PLATFORM" -f "$pdef" > "$OUT/platform-default.yaml"
-helm template registry-platform "$PLATFORM" -f "$pdef" -f "$pall" > "$OUT/platform-all.yaml"
+render() { # render <имя> <команда…> — вывод в $OUT/<имя>.yaml; отказ — красное, прогон идёт дальше
+  local name="$1"; shift
+  if "$@" > "$OUT/$name.yaml" 2> "$OUT/$name.err"; then ok "render-$name"; else bad "render-$name"; sed 's/^/  | /' "$OUT/$name.err"; fi
+}
+render platform-default helm template registry-platform "$PLATFORM" -f "$pdef"
+render platform-all helm template registry-platform "$PLATFORM" -f "$pdef" -f "$pall"
 step layers py layers "$OUT/platform-default.yaml" "$OUT/layers"
 
 # Слой площадки — как его прочтёт addons-operator.
-cp "$OUT/layers/site.layer" "$OUT/layers/site.yaml"
+cp "$OUT/layers/site.layer" "$OUT/layers/site.yaml" 2>/dev/null || : > "$OUT/layers/site.yaml"
 
 harness() { # harness <текст> <вход проводника> <выход>
-  helm template h "$HARNESS" --show-only templates/render.yaml --set-file "text=$1" -f "$2" > "$3.raw"
-  py strip "$3.raw" "$3"
+  if helm template h "$HARNESS" --show-only templates/render.yaml --set-file "text=$1" -f "$2" > "$3.raw" 2> "$3.err"; then
+    py strip "$3.raw" "$3"
+  else
+    bad "harness $(basename "$3")"; sed 's/^/  | /' "$3.err"; : > "$3"
+  fi
 }
 
 # 2. Заказы: слой заказа с переменными → рендер экземпляра → тело Addon.
@@ -63,15 +70,11 @@ instances=(
 )
 for row in "${instances[@]}"; do
   read -r order extra probes <<<"$row"
-  py vars "$T/orders/$order.yaml" "$OUT/layers/$order.vars.yaml"
+  py vars "$T/orders/$order.yaml" "$OUT/layers/$order.vars.yaml" || bad "vars $order"
   harness "$OUT/layers/order.layer" "$OUT/layers/$order.vars.yaml" "$OUT/layers/$order.order.yaml"
   site=(-f "$OUT/layers/site.yaml"); [ "$extra" = - ] || site+=(-f "$extra")
   step "lint-instance-$order" helm lint --strict "$INSTANCE" -f "$OUT/layers/$order.order.yaml" "${site[@]}"
-  if helm template "zot-$order" "$INSTANCE" -f "$OUT/layers/$order.order.yaml" "${site[@]}" > "$OUT/instance-$order.yaml" 2> "$OUT/instance-$order.err"; then
-    ok "render-instance-$order"
-  else
-    bad "render-instance-$order"; sed 's/^/  | /' "$OUT/instance-$order.err"
-  fi
+  render "instance-$order" helm template "zot-$order" "$INSTANCE" -f "$OUT/layers/$order.order.yaml" "${site[@]}"
   merged="$OUT/layers/$order.site.yaml"
   if [ "$extra" = - ]; then cp "$OUT/layers/site.yaml" "$merged"; else
     python3 - "$OUT/layers/site.yaml" "$extra" "$merged" <<'EOF'
@@ -86,14 +89,18 @@ EOF
   fi
   step "probe-instance-$order" py probe-instance "$OUT/instance-$order.yaml" "$merged" "$OUT/layers/$order.vars.yaml" "$probes"
   harness "$OUT/layers/addontemplate-1.0.0.tmpl" "$OUT/layers/$order.vars.yaml" "$OUT/layers/$order.addon-spec.yaml"
-  py wrap-addon "$OUT/layers/$order.addon-spec.yaml" "reg-$order" "$OUT/addon-$order.yaml"
+  if py wrap-addon "$OUT/layers/$order.addon-spec.yaml" "reg-$order" "$OUT/addon-$order.yaml" 2> "$OUT/addon-$order.err"; then
+    ok "render-addon-$order"
+  else
+    bad "render-addon-$order"; sed 's/^/  | /' "$OUT/addon-$order.err"
+  fi
 done
 
 # 3. Golden: каждый рендер побайтно против записанного.
 for f in platform-default platform-all instance-abc123 instance-def456 addon-abc123 addon-def456; do
   g="$T/golden/$f.yaml"
   if [ "$UPDATE" = 1 ]; then
-    cp "$OUT/$f.yaml" "$g"; ok "golden-$f (rewritten)"
+    cp "$OUT/$f.yaml" "$g" 2>/dev/null && ok "golden-$f (rewritten)" || bad "golden-$f: no render"
   elif [ -f "$g" ] && diff -u "$g" "$OUT/$f.yaml" > "$OUT/golden-$f.diff"; then
     ok "golden-$f"
   else
@@ -137,7 +144,7 @@ import sys, yaml
 o = yaml.safe_load(open(sys.argv[1])); o.update({k: v for k, v in yaml.safe_load(open(sys.argv[2])).items()})
 yaml.safe_dump(o, open(sys.argv[3], "w"))
 EOF
-  py vars "$OUT/layers/neg-order.yaml" "$OUT/layers/neg.vars.yaml"
+  py vars "$OUT/layers/neg-order.yaml" "$OUT/layers/neg.vars.yaml" || bad "vars $(basename "$f")"
   harness "$OUT/layers/order.layer" "$OUT/layers/neg.vars.yaml" "$OUT/layers/neg.order.yaml"
   negative "$f" helm template zot-abc123 "$INSTANCE" -f "$OUT/layers/site.yaml" -f "$OUT/layers/neg.order.yaml"
 done

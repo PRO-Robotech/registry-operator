@@ -17,6 +17,12 @@ on:
 permissions:
   contents: read
 
+# Новый прогон той же ветки снимает прежний: занимать раннеры устаревшей головой незачем.
+# Публикацию по тегу не снимает ничто.
+concurrency:
+  group: charts-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
 env:
   HELM_VERSION: v3.22.1
   KUBECONFORM_VERSION: v0.7.0
