@@ -67,14 +67,17 @@ type Role struct {
 	RepositoryVerbs []string
 }
 
-// Роли модуля registry.
+// Роли модуля registry — те же классы, что роли манифеста модуля
+// (charts/registry-platform/files/registry.manifest.yaml): класса create на
+// регистри kaname ролью модуля не выдаёт, заведение репозитория — update на
+// регистри.
 var (
 	RolePuller = Role{RegistryVerbs: []string{"v_get"}, RepositoryVerbs: []string{"v_get", "v_list"}}
-	RolePusher = Role{RegistryVerbs: []string{"v_get", "v_create"}, RepositoryVerbs: []string{"v_get", "v_list", "v_update"}}
-	RoleAdmin  = Role{RegistryVerbs: []string{"v_get", "v_create", "v_update", "v_delete"}, RepositoryVerbs: []string{"v_get", "v_list", "v_update", "v_delete"}}
-	// RoleCreateOnly — только заведение репозиториев: права на запись в
-	// существующие нет (F3).
-	RoleCreateOnly = Role{RegistryVerbs: []string{"v_get", "v_create"}}
+	RolePusher = Role{RegistryVerbs: []string{"v_get", "v_update"}, RepositoryVerbs: []string{"v_get", "v_list", "v_update"}}
+	RoleAdmin  = Role{RegistryVerbs: []string{"v_get", "v_list", "v_update", "v_delete"}, RepositoryVerbs: []string{"v_get", "v_list", "v_update", "v_delete"}}
+	// RoleCreateOnly — только заведение репозиториев (update на регистри):
+	// права на запись в существующие нет (F3).
+	RoleCreateOnly = Role{RegistryVerbs: []string{"v_get", "v_update"}}
 )
 
 // Grant — выдача роли субъекту: на один регистри либо на весь аккаунт.
