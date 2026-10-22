@@ -41,14 +41,14 @@ pdef="$T/cases/platform-default.yaml"
 pall="$T/cases/platform-all.yaml"
 
 # 1. Платформа: lint и рендер по умолчанию и со всем включённым.
-step lint-platform-default helm lint --strict "$PLATFORM" -f "$pdef"
-step lint-platform-all helm lint --strict "$PLATFORM" -f "$pdef" -f "$pall"
+step lint-platform-default helm lint --strict --kube-version 1.30.0 "$PLATFORM" -f "$pdef"
+step lint-platform-all helm lint --strict --kube-version 1.30.0 "$PLATFORM" -f "$pdef" -f "$pall"
 render() { # render <имя> <команда…> — вывод в $OUT/<имя>.yaml; отказ — красное, прогон идёт дальше
   local name="$1"; shift
   if "$@" > "$OUT/$name.yaml" 2> "$OUT/$name.err"; then ok "render-$name"; else bad "render-$name"; sed 's/^/  | /' "$OUT/$name.err"; fi
 }
-render platform-default helm template registry-platform "$PLATFORM" -f "$pdef"
-render platform-all helm template registry-platform "$PLATFORM" -f "$pdef" -f "$pall"
+render platform-default helm template registry-platform "$PLATFORM" --kube-version 1.30.0 -f "$pdef"
+render platform-all helm template registry-platform "$PLATFORM" --kube-version 1.30.0 -f "$pdef" -f "$pall"
 step layers py layers "$OUT/platform-default.yaml" "$OUT/layers"
 
 # Слой площадки — как его прочтёт addons-operator.
@@ -73,8 +73,8 @@ for row in "${instances[@]}"; do
   py vars "$T/orders/$order.yaml" "$OUT/layers/$order.vars.yaml" || bad "vars $order"
   harness "$OUT/layers/order.layer" "$OUT/layers/$order.vars.yaml" "$OUT/layers/$order.order.yaml"
   site=(-f "$OUT/layers/site.yaml"); [ "$extra" = - ] || site+=(-f "$extra")
-  step "lint-instance-$order" helm lint --strict "$INSTANCE" -f "$OUT/layers/$order.order.yaml" "${site[@]}"
-  render "instance-$order" helm template "zot-$order" "$INSTANCE" -f "$OUT/layers/$order.order.yaml" "${site[@]}"
+  step "lint-instance-$order" helm lint --strict --kube-version 1.30.0 "$INSTANCE" -f "$OUT/layers/$order.order.yaml" "${site[@]}"
+  render "instance-$order" helm template "zot-$order" "$INSTANCE" --kube-version 1.30.0 -f "$OUT/layers/$order.order.yaml" "${site[@]}"
   merged="$OUT/layers/$order.site.yaml"
   if [ "$extra" = - ]; then cp "$OUT/layers/site.yaml" "$merged"; else
     python3 - "$OUT/layers/site.yaml" "$extra" "$merged" <<'EOF'
@@ -125,14 +125,14 @@ negative() { # negative <файл> <команда рендера…>
 n=0
 for f in "$T"/negative/registry-instance/*.yaml; do
   n=$((n + 1))
-  negative "$f" helm template zot-abc123 "$INSTANCE" -f "$OUT/layers/abc123.order.yaml" -f "$OUT/layers/site.yaml"
+  negative "$f" helm template zot-abc123 "$INSTANCE" --kube-version 1.30.0 -f "$OUT/layers/abc123.order.yaml" -f "$OUT/layers/site.yaml"
 done
 for f in "$T"/negative/registry-platform/*.yaml; do
   n=$((n + 1))
   if grep -q '^# base: all' "$f"; then
-    negative "$f" helm template registry-platform "$PLATFORM" -f "$pdef" -f "$pall"
+    negative "$f" helm template registry-platform "$PLATFORM" --kube-version 1.30.0 -f "$pdef" -f "$pall"
   else
-    negative "$f" helm template registry-platform "$PLATFORM" -f "$pdef"
+    negative "$f" helm template registry-platform "$PLATFORM" --kube-version 1.30.0 -f "$pdef"
   fi
 done
 # Цепочка: переменная заказа вне формы доходит до схемы экземпляра и получает отказ.
@@ -146,7 +146,7 @@ yaml.safe_dump(o, open(sys.argv[3], "w"))
 EOF
   py vars "$OUT/layers/neg-order.yaml" "$OUT/layers/neg.vars.yaml" || bad "vars $(basename "$f")"
   harness "$OUT/layers/order.layer" "$OUT/layers/neg.vars.yaml" "$OUT/layers/neg.order.yaml"
-  negative "$f" helm template zot-abc123 "$INSTANCE" -f "$OUT/layers/site.yaml" -f "$OUT/layers/neg.order.yaml"
+  negative "$f" helm template zot-abc123 "$INSTANCE" --kube-version 1.30.0 -f "$OUT/layers/site.yaml" -f "$OUT/layers/neg.order.yaml"
 done
 [ "$n" -gt 0 ] || bad "negative: no negative probes found"
 
