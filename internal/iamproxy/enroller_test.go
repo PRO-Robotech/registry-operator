@@ -79,7 +79,7 @@ func validConfig() iamproxy.Config {
 	return iamproxy.Config{
 		Listen: ":8080", HealthListen: ":8081", Upstream: "http://127.0.0.1:5000", UpstreamReadyPath: "/readyz", RegistryID: "abc123",
 		JWKSURL: "https://iam.example.test/jwks", JWKSCAFile: "/ca", Issuer: "https://iam.example.test", Audience: "registry", TokenTypes: "at+jwt",
-		KanameAddress: "kaname.iam-system.svc:9090", KanameServerName: "kaname.iam-system.svc", KanameCAFile: "/ca",
+		KanameURL: "https://kaname.iam-system.svc:9098", KanameCAFile: "/ca",
 		CheckTimeout: 2e9, CacheTTL: 10e9,
 		EnrollURL: "https://registry-operator.registry-system.svc:8443", EnrollCAFile: "/ca", EnrollTokenFile: "/tok", EnrollTimeout: 15e9,
 	}
@@ -103,6 +103,8 @@ func TestConfig_RefusesAnIncompleteOrUnsafeConfiguration(t *testing.T) {
 		"plaintext enrollment":    {func(c *iamproxy.Config) { c.EnrollURL = "http://registry-operator:8443" }, "enroll-url"},
 		"no projected token":      {func(c *iamproxy.Config) { c.EnrollTokenFile = "" }, "enroll-token-file"},
 		"kaname without CA":       {func(c *iamproxy.Config) { c.KanameCAFile = "" }, "kaname-ca"},
+		"plaintext kaname":        {func(c *iamproxy.Config) { c.KanameURL = "http://kaname.iam-system.svc:9098" }, "kaname-url"},
+		"kaname url with a path":  {func(c *iamproxy.Config) { c.KanameURL = "https://kaname.iam-system.svc:9098/x" }, "kaname-url"},
 		"registry id with colon":  {func(c *iamproxy.Config) { c.RegistryID = "abc:123" }, "registry-id"},
 		"no token types":          {func(c *iamproxy.Config) { c.TokenTypes = " " }, "token-types"},
 		"check without deadline":  {func(c *iamproxy.Config) { c.CheckTimeout = 0 }, "check-timeout"},
@@ -132,7 +134,7 @@ func TestConfig_TheFlagsOfTheInstanceChartAreUnderstood(t *testing.T) {
 		"--listen=:8080", "--health-listen=:8081", "--upstream=http://127.0.0.1:5000", "--upstream-ready-path=/readyz",
 		"--registry-id=abc123", "--public=false",
 		"--jwks-url=https://iam.example.test/jwks", "--jwks-ca=/ca", "--issuer=https://iam.example.test", "--audience=registry",
-		"--kaname-address=kaname.iam-system.svc:9090", "--kaname-server-name=kaname.iam-system.svc", "--kaname-ca=/ca",
+		"--kaname-url=https://kaname.iam-system.svc:9098", "--kaname-ca=/ca",
 		"--check-timeout=2s", "--cache-ttl=10s",
 		"--enroll-url=https://registry-operator.registry-system.svc:8443", "--enroll-ca=/ca", "--enroll-token-file=/tok", "--enroll-timeout=15s",
 	}

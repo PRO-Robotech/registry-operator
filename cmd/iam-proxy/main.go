@@ -7,7 +7,6 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
@@ -22,11 +21,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
 
 	"github.com/PRO-Robotech/registry-operator/internal/iamproxy"
-	"github.com/PRO-Robotech/registry-operator/internal/tlsfile"
 )
 
 func main() {
@@ -60,20 +56,15 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	pool, err := tlsfile.CAPool(cfg.KanameCAFile)
+	kanameClient, err := iamproxy.TLSClient(cfg.KanameCAFile, cfg.CheckTimeout)
 	if err != nil {
 		return err
 	}
-	conn, err := grpc.NewClient(cfg.KanameAddress, grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
-		MinVersion: tls.VersionTLS12, RootCAs: pool, ServerName: cfg.KanameServerName,
-	})))
+	kaname, err := iamproxy.NewKanameChecker(cfg.KanameURL, kanameClient, cfg.CheckTimeout)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = conn.Close() }()
-	checker := &iamproxy.CachedChecker{
-		Inner: iamproxy.NewKanameChecker(conn, cfg.CheckTimeout), TTL: cfg.CacheTTL, MaxEntries: 16384, Now: time.Now,
-	}
+	checker := &iamproxy.CachedChecker{Inner: kaname, TTL: cfg.CacheTTL, MaxEntries: 16384, Now: time.Now}
 	enrollClient, err := iamproxy.TLSClient(cfg.EnrollCAFile, cfg.EnrollTimeout)
 	if err != nil {
 		return err

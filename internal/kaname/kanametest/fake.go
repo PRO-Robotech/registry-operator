@@ -24,12 +24,14 @@ import (
 	"crypto/x509"
 	"fmt"
 	"net"
+	"net/http"
 	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
+	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -400,16 +402,20 @@ func (f *Fake) allowed(subject, relation, object string) bool {
 type Servers struct {
 	// InternalAddr — внутренний листенер (mTLS).
 	InternalAddr string
-	// PublicAddr — публичный листенер (TLS, токен вызывающего).
-	PublicAddr string
-	stop       func()
+	// PublicURL — публичный REST-фронт (https, TLS сервера, токен
+	// вызывающего): AuthorizeService.Check по /iam/v1/authorize:check.
+	PublicURL string
+	stop      func()
 }
 
 // Stop останавливает листенеры.
 func (s *Servers) Stop() { s.stop() }
 
-// Serve поднимает оба листенера на localhost: внутренний требует лист
-// центра clientCA, публичный — только TLS сервера.
+// Serve поднимает оба листенера на localhost: внутренний gRPC требует
+// лист центра clientCA, публичный REST-фронт — только TLS сервера, как
+// собственный публичный REST-фронт kaname. Публичного gRPC у двойника нет:
+// у kaname он требует клиентский лист (corelib grpcsrv/tls.go,
+// RequireAndVerifyClientCert), и клиенту с одним токеном туда пути нет.
 func (f *Fake) Serve(serverCert tls.Certificate, clientCA *x509.CertPool) (*Servers, error) {
 	return f.ServeOn(serverCert, clientCA, "127.0.0.1:0", "127.0.0.1:0")
 }
@@ -432,25 +438,24 @@ func (f *Fake) ServeOn(serverCert tls.Certificate, clientCA *x509.CertPool, inte
 		ClientAuth:   tls.RequireAndVerifyClientCert,
 	})))
 	iamv1.RegisterInternalIAMServiceServer(internal, &internalServer{f: f})
-	// Публичный gRPC kaname требует проверенный клиентский лист
-	// (corelib grpcsrv/tls.go, RequireAndVerifyClientCert): двойник не
-	// снисходительнее продукта, иначе проба зеленеет на пути, которого у
-	// клиента с одним токеном нет.
-	public := grpc.NewServer(grpc.Creds(credentials.NewTLS(&tls.Config{
+	mux := runtime.NewServeMux()
+	if err := iamv1.RegisterAuthorizeServiceHandlerServer(context.Background(), mux, &authorizeServer{f: f}); err != nil {
+		_ = internalLn.Close()
+		_ = publicLn.Close()
+		return nil, err
+	}
+	public := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second, TLSConfig: &tls.Config{
 		MinVersion:   tls.VersionTLS12,
 		Certificates: []tls.Certificate{serverCert},
-		ClientCAs:    clientCA,
-		ClientAuth:   tls.RequireAndVerifyClientCert,
-	})))
-	iamv1.RegisterAuthorizeServiceServer(public, &authorizeServer{f: f})
+	}}
 	go func() { _ = internal.Serve(internalLn) }()
-	go func() { _ = public.Serve(publicLn) }()
+	go func() { _ = public.ServeTLS(publicLn, "", "") }()
 	return &Servers{
 		InternalAddr: internalLn.Addr().String(),
-		PublicAddr:   publicLn.Addr().String(),
+		PublicURL:    "https://" + publicLn.Addr().String(),
 		stop: func() {
 			internal.Stop()
-			public.Stop()
+			_ = public.Close()
 		},
 	}, nil
 }

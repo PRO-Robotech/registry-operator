@@ -160,12 +160,13 @@ PY
 		|| unmet "the registry module leaf is not issued"
 	chmod 600 "$WORK/registry.key"
 
-	# Переадресации — по ИМЕНАМ портов Service: публичный gRPC, выдача
-	# токенов и публичный REST — у Service службы; внутренний gRPC и набор
-	# ключей — у её внутреннего Service.
+	# Переадресации — по ИМЕНАМ портов Service: выдача токенов и публичный
+	# REST-фронт (Check прокси) — у Service службы; внутренний gRPC и набор
+	# ключей — у её внутреннего Service. Публичный gRPC требует клиентский
+	# лист, и клиенту с одним токеном не нужен.
 	free_port() { python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()'; }
-	PUBLIC=$(free_port); TOKEN=$(free_port); REST=$(free_port); INTERNAL=$(free_port); JWKS=$(free_port)
-	"${K[@]}" port-forward "svc/$REL" "$PUBLIC:grpc" "$TOKEN:registry-token" "$REST:http-rest" > "$WORK/pf1.log" 2>&1 &
+	TOKEN=$(free_port); REST=$(free_port); INTERNAL=$(free_port); JWKS=$(free_port)
+	"${K[@]}" port-forward "svc/$REL" "$TOKEN:registry-token" "$REST:http-rest" > "$WORK/pf1.log" 2>&1 &
 	PIDS+=($!)
 	"${K[@]}" port-forward "svc/$REL-internal" "$INTERNAL:grpc-internal" "$JWKS:http-jwks" > "$WORK/pf2.log" 2>&1 &
 	PIDS+=($!)
@@ -181,8 +182,6 @@ PY
 
 	export REGOP_IT_INTERNAL_ADDR="127.0.0.1:$INTERNAL"
 	export REGOP_IT_INTERNAL_SERVER_NAME="$REL-internal.$REGOP_IT_NAMESPACE.svc"
-	export REGOP_IT_PUBLIC_ADDR="127.0.0.1:$PUBLIC"
-	export REGOP_IT_PUBLIC_SERVER_NAME="$REL.$REGOP_IT_NAMESPACE.svc"
 	export REGOP_IT_REST_URL="https://127.0.0.1:$REST"
 	export REGOP_IT_TOKEN_URL="https://127.0.0.1:$TOKEN/iam/v1/token"
 	export REGOP_IT_JWKS_URL="https://127.0.0.1:$JWKS$KEYSET_PATH"

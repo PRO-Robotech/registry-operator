@@ -4,20 +4,19 @@
 package iamproxy
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
-
-	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/status"
 )
 
 // Глаголы модели прав, которые спрашивает прокси.
@@ -51,17 +50,44 @@ type Checker interface {
 	Check(ctx context.Context, id Identity, verb, object string) (bool, error)
 }
 
+// checkPath — AuthorizeService.Check публичного REST-фронта kaname: та же
+// дверь, что у всякого клиента API с одним токеном. Публичный gRPC kaname
+// требует проверенный клиентский лист (corelib grpcsrv/tls.go,
+// RequireAndVerifyClientCert), и личность там — лист, а не токен.
+const checkPath = "/iam/v1/authorize:check"
+
 // KanameChecker — публичный AuthorizeService.Check kaname. Спрашивает
 // всегда о субъекте токена и его же токеном: своих прав у прокси нет, и
 // спросить о чужом субъекте он не может по построению.
 type KanameChecker struct {
-	RPC     iamv1.AuthorizeServiceClient
-	Timeout time.Duration
+	url     string
+	http    *http.Client
+	timeout time.Duration
 }
 
-// NewKanameChecker — клиент публичного gRPC kaname.
-func NewKanameChecker(conn *grpc.ClientConn, timeout time.Duration) *KanameChecker {
-	return &KanameChecker{RPC: iamv1.NewAuthorizeServiceClient(conn), Timeout: timeout}
+// NewKanameChecker — клиент публичного REST-фронта kaname; base — https
+// без пути, client доверяет центру kaname.
+func NewKanameChecker(base string, client *http.Client, timeout time.Duration) (*KanameChecker, error) {
+	u, err := url.Parse(base)
+	if err != nil || u.Scheme != "https" || u.Host == "" || (u.Path != "" && u.Path != "/") || u.RawQuery != "" {
+		return nil, fmt.Errorf("kaname url %q must be an https URL without a path", base)
+	}
+	if client == nil || timeout <= 0 {
+		return nil, errors.New("kaname checker needs an http client and a deadline")
+	}
+	return &KanameChecker{url: strings.TrimSuffix(base, "/") + checkPath, http: client, timeout: timeout}, nil
+}
+
+type checkRequest struct {
+	Subject          string      `json:"subject"`
+	Resource         resourceRef `json:"resource"`
+	Action           string      `json:"action"`
+	RequiredRelation string      `json:"requiredRelation"`
+}
+
+type resourceRef struct {
+	Type string `json:"type"`
+	ID   string `json:"id"`
 }
 
 // Check — право субъекта токена на объект.
@@ -70,26 +96,44 @@ func (k *KanameChecker) Check(ctx context.Context, id Identity, verb, object str
 	if !ok {
 		return false, fmt.Errorf("object %q is not <type>:<id>", object)
 	}
-	ctx, cancel := context.WithTimeout(ctx, k.Timeout)
-	defer cancel()
-	ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+id.Token)
-	resp, err := k.RPC.Check(ctx, &iamv1.AuthorizeCheckRequest{
-		Subject:          id.Subject,
-		Resource:         &iamv1.ResourceRef{Type: typ, Id: oid},
-		Action:           actionOf(verb, typ),
-		RequiredRelation: verb,
+	body, err := json.Marshal(checkRequest{
+		Subject: id.Subject, Resource: resourceRef{Type: typ, ID: oid},
+		Action: actionOf(verb, typ), RequiredRelation: verb,
 	})
-	switch status.Code(err) {
-	case codes.OK:
-		return resp.GetAllowed(), nil
-	case codes.Unauthenticated:
+	if err != nil {
+		return false, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, k.timeout)
+	defer cancel()
+	// Адрес — флаг запуска (только https), а не вход запроса.
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, k.url, bytes.NewReader(body)) //nolint:gosec // см. выше.
+	if err != nil {
+		return false, err
+	}
+	req.Header.Set("Authorization", "Bearer "+id.Token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := k.http.Do(req) //nolint:gosec // адрес — флаг запуска, только https.
+	if err != nil {
+		return false, fmt.Errorf("%w: %v", ErrCheckUnavailable, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		var out struct {
+			Allowed bool `json:"allowed"`
+		}
+		if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<16)).Decode(&out); err != nil {
+			return false, fmt.Errorf("%w: undecodable answer", ErrCheckUnavailable)
+		}
+		return out.Allowed, nil
+	case http.StatusUnauthorized:
 		return false, ErrUnauthenticated
-	case codes.PermissionDenied:
+	case http.StatusForbidden:
 		// Вопрос о себе отвергнут только тогда, когда kaname видит в токене
 		// другого субъекта: решения о праве нет, есть отказ.
 		return false, nil
 	default:
-		return false, fmt.Errorf("%w: %s", ErrCheckUnavailable, status.Code(err))
+		return false, fmt.Errorf("%w: status %d", ErrCheckUnavailable, resp.StatusCode)
 	}
 }
 

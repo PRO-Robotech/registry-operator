@@ -23,8 +23,6 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
 
 	"github.com/PRO-Robotech/registry-operator/internal/iamproxy"
 	"github.com/PRO-Robotech/registry-operator/internal/kaname"
@@ -171,14 +169,13 @@ func newEnv(t *testing.T, public bool) *env {
 		t.Fatal(err)
 	}
 	t.Cleanup(srv.Stop)
-	conn, err := grpc.NewClient(srv.PublicAddr, grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
+	kc, err := iamproxy.NewKanameChecker(srv.PublicURL, &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{
 		MinVersion: tls.VersionTLS12, RootCAs: ca.Pool(), ServerName: "kaname.test",
-	})))
+	}}}, 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = conn.Close() })
-	checker := &iamproxy.CachedChecker{Inner: iamproxy.NewKanameChecker(conn, 5*time.Second), TTL: 10 * time.Second, MaxEntries: 1024, Now: ck.Now}
+	checker := &iamproxy.CachedChecker{Inner: kc, TTL: 10 * time.Second, MaxEntries: 1024, Now: ck.Now}
 
 	for _, id := range []string{regID, otherReg} {
 		fake.RegisterDirect(kaname.RegistryObject(id), kanametest.Object{Subject: "project:prj1", Relation: "project",

@@ -38,11 +38,12 @@ type Config struct {
 	Audience   string
 	TokenTypes string
 
-	KanameAddress    string
-	KanameServerName string
-	KanameCAFile     string
-	CheckTimeout     time.Duration
-	CacheTTL         time.Duration
+	// KanameURL — публичный REST-фронт kaname (https без пути): Check тем же
+	// токеном, что у клиента API.
+	KanameURL    string
+	KanameCAFile string
+	CheckTimeout time.Duration
+	CacheTTL     time.Duration
 
 	EnrollURL       string
 	EnrollCAFile    string
@@ -67,8 +68,7 @@ func (c *Config) BindFlags(fs *flag.FlagSet) {
 	fs.StringVar(&c.Issuer, "issuer", "", "token issuer")
 	fs.StringVar(&c.Audience, "audience", "", "token audience of the public API of kaname")
 	fs.StringVar(&c.TokenTypes, "token-types", "at+jwt", "comma-separated accepted typ headers")
-	fs.StringVar(&c.KanameAddress, "kaname-address", "", "host:port of the public gRPC of kaname")
-	fs.StringVar(&c.KanameServerName, "kaname-server-name", "", "server name in the kaname certificate")
+	fs.StringVar(&c.KanameURL, "kaname-url", "", "https URL of the public REST front of kaname (AuthorizeService.Check)")
 	fs.StringVar(&c.KanameCAFile, "kaname-ca", "", "CA bundle of kaname")
 	fs.DurationVar(&c.CheckTimeout, "check-timeout", 2*time.Second, "deadline of one authorization check")
 	fs.DurationVar(&c.CacheTTL, "cache-ttl", MaxCacheTTL, "lifetime of a cached read verdict (at most 10s)")
@@ -100,8 +100,11 @@ func (c *Config) Validate() error {
 	if strings.TrimSpace(c.TokenTypes) == "" {
 		add("token-types must not be empty")
 	}
-	if c.KanameAddress == "" || c.KanameServerName == "" || c.KanameCAFile == "" {
-		add("kaname-address, kaname-server-name and kaname-ca are required")
+	if u, err := url.Parse(c.KanameURL); err != nil || u.Scheme != "https" || u.Host == "" || (u.Path != "" && u.Path != "/") || u.RawQuery != "" {
+		add("kaname-url must be an https URL without a path")
+	}
+	if c.KanameCAFile == "" {
+		add("kaname-ca is required: kaname is trusted only under a declared CA")
 	}
 	if c.CheckTimeout <= 0 || c.CheckTimeout > 30*time.Second {
 		add("check-timeout must be within (0, 30s]")

@@ -33,8 +33,6 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
 
 	"github.com/PRO-Robotech/registry-operator/internal/iamproxy"
 	"github.com/PRO-Robotech/registry-operator/internal/kaname"
@@ -161,13 +159,12 @@ func TestProxyInFrontOfZot_PushAndPullThroughRights(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer srv.Stop()
-	conn, err := grpc.NewClient(srv.PublicAddr, grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
+	kc, err := iamproxy.NewKanameChecker(srv.PublicURL, &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{
 		MinVersion: tls.VersionTLS12, RootCAs: ca.Pool(), ServerName: "kaname.test",
-	})))
+	}}}, 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = conn.Close() }()
 	fake.RegisterDirect(kaname.RegistryObject(regID), kanametest.Object{Subject: "project:prj1", Relation: "project",
 		ParentChain: []string{"project:prj1"}, ParentProjectID: "prj1", ParentAccountID: "acc1"})
 	fake.AddGrant(kanametest.Grant{Subject: "service_account:sva1", Role: kanametest.RolePusher, Registry: regID})
@@ -175,7 +172,7 @@ func TestProxyInFrontOfZot_PushAndPullThroughRights(t *testing.T) {
 	upstream, _ := url.Parse(zotURL)
 	p, err := iamproxy.New(iamproxy.Options{
 		RegistryID: regID, Upstream: upstream, Verifier: verifier,
-		Checker:  &iamproxy.CachedChecker{Inner: iamproxy.NewKanameChecker(conn, 5*time.Second), TTL: 10 * time.Second, MaxEntries: 64, Now: time.Now},
+		Checker:  &iamproxy.CachedChecker{Inner: kc, TTL: 10 * time.Second, MaxEntries: 64, Now: time.Now},
 		Enroller: &enroller{fake: fake, by: map[string]string{}},
 		Log:      slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})

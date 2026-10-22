@@ -8,7 +8,8 @@
 // же, что для API: служебной учётки (обмен подписанного утверждения ключом
 // учётки на /iam/v1/token) и человека (своя церемония службы, посев стенда).
 // Прокси собран из тех же частей, что в поде (проверка токена по набору
-// ключей kaname, Check «о себе» тем же токеном, кэш вердиктов), перед
+// ключей kaname, Check «о себе» тем же токеном на публичном REST-фронте
+// kaname, кэш вердиктов), перед
 // двойником zot на loopback; регистри и репозитории записаны в kaname
 // личностью модуля registry по mTLS. Проект, учётку и выдачи заводит сама
 // проба через API администратора стенда (бутстрап-удостоверение); аккаунт —
@@ -55,7 +56,6 @@ import (
 // Окружение пробы (ставит hack/it-kaname.sh probe).
 var envNames = []string{
 	"REGOP_IT_INTERNAL_ADDR", "REGOP_IT_INTERNAL_SERVER_NAME",
-	"REGOP_IT_PUBLIC_ADDR", "REGOP_IT_PUBLIC_SERVER_NAME",
 	"REGOP_IT_REST_URL", "REGOP_IT_TOKEN_URL", "REGOP_IT_JWKS_URL",
 	"REGOP_IT_ISSUER", "REGOP_IT_AUDIENCE", "REGOP_IT_TLS_DIR",
 }
@@ -492,11 +492,7 @@ func (w *world) newProxy(t *testing.T, registry string, public bool, cacheTTL ti
 	if err != nil {
 		t.Fatal(err)
 	}
-	conn, err := grpc.NewClient(env["REGOP_IT_PUBLIC_ADDR"], grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(caPool(t), env["REGOP_IT_PUBLIC_SERVER_NAME"])))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = conn.Close() })
+	kc := restChecker(t)
 	z := &zot{}
 	zs := httptest.NewServer(z)
 	t.Cleanup(zs.Close)
@@ -512,7 +508,7 @@ func (w *world) newProxy(t *testing.T, registry string, public bool, cacheTTL ti
 	})
 	p, err := iamproxy.New(iamproxy.Options{
 		RegistryID: registry, Public: public, Upstream: up, Verifier: v,
-		Checker:  &iamproxy.CachedChecker{Inner: iamproxy.NewKanameChecker(conn, 10*time.Second), TTL: cacheTTL, MaxEntries: 1024, Now: time.Now},
+		Checker:  &iamproxy.CachedChecker{Inner: kc, TTL: cacheTTL, MaxEntries: 1024, Now: time.Now},
 		Enroller: enr, Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	if err != nil {
@@ -743,19 +739,23 @@ func TestKaname_RevocationReachesTheProxyWithinTheCacheTTL(t *testing.T) {
 		t.Fatalf("the proxy refused %v after kaname, beyond its cache window %v", atProxy-atKaname, iamproxy.MaxCacheTTL)
 	}
 
-	ck := iamproxy.NewKanameChecker(mustPublicConn(t), 10*time.Second)
+	ck := restChecker(t)
 	other := iamproxy.Identity{Subject: "user:usr0000000000000000000", Token: w.sa.token}
 	if ok, err := ck.Check(context.Background(), other, iamproxy.VerbGet, kaname.RepositoryObject(w.reg, "team/app")); err == nil && ok {
 		t.Fatal("the ordinary token answered a Check about another subject")
 	}
 }
 
-func mustPublicConn(t *testing.T) *grpc.ClientConn {
+// restChecker — Check публичного REST-фронта kaname, как у прокси в поде.
+func restChecker(t *testing.T) *iamproxy.KanameChecker {
 	t.Helper()
-	conn, err := grpc.NewClient(env["REGOP_IT_PUBLIC_ADDR"], grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(caPool(t), env["REGOP_IT_PUBLIC_SERVER_NAME"])))
+	client, err := iamproxy.TLSClient(tlsPath("server-ca.crt"), 10*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = conn.Close() })
-	return conn
+	kc, err := iamproxy.NewKanameChecker(env["REGOP_IT_REST_URL"], client, 10*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return kc
 }

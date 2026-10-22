@@ -283,3 +283,9 @@ injections:
     new: ""
     package: ./internal/enroll/
     tests: [TestEnroll_StopAbandonsARunningCompensationWithItsAccount]
+  - name: refused-token-read-as-a-denial
+    file: internal/iamproxy/authz.go
+    old: "\tcase http.StatusUnauthorized:\n\t\treturn false, ErrUnauthenticated\n"
+    new: "\tcase http.StatusUnauthorized:\n\t\treturn false, nil\n"
+    package: ./internal/iamproxy/
+    tests: [TestProxy_TokenKanameDoesNotAuthenticateIsNotAnAllow]
