@@ -109,10 +109,10 @@ jobs:
           import os
           import subprocess
           import sys
-          
+
           def git(*args):
               return subprocess.check_output(['git', *args], text=True).strip()
-          
+
           phase = sys.argv[1]
           assert phase in ('before', 'after'), phase
           head = git('rev-parse', 'HEAD')
@@ -148,10 +148,10 @@ jobs:
           import os
           import subprocess
           import sys
-          
+
           def git(*args):
               return subprocess.check_output(['git', *args], text=True).strip()
-          
+
           phase = sys.argv[1]
           assert phase in ('before', 'after'), phase
           head = git('rev-parse', 'HEAD')
