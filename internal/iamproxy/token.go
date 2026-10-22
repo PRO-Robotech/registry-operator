@@ -202,15 +202,16 @@ type jwk struct {
 }
 
 func (v *Verifier) fetch(ctx context.Context) (map[string]*ecdsa.PublicKey, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, v.cfg.JWKSURL, nil)
+	// Адрес набора ключей — флаг запуска (только https), а не вход запроса.
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, v.cfg.JWKSURL, nil) //nolint:gosec // см. выше.
 	if err != nil {
 		return nil, err
 	}
-	resp, err := v.cfg.HTTPClient.Do(req)
+	resp, err := v.cfg.HTTPClient.Do(req) //nolint:gosec // адрес — флаг запуска, только https.
 	if err != nil {
 		return nil, fmt.Errorf("fetch key set: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("fetch key set: status %d", resp.StatusCode)
 	}

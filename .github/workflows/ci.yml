@@ -37,9 +37,12 @@ jobs:
       - name: census
         if: always()
         run: |
-          echo "packages ok:   $(grep -c '^ok ' test.log || true)"
-          echo "packages FAIL: $(grep -c '^FAIL' test.log || true)"
-          echo "no test files: $(grep -c 'no test files' test.log || true)"
+          pass=$(grep -c -- '--- PASS:' test.log || true)
+          fail=$(grep -c -- '--- FAIL:' test.log || true)
+          skip=$(grep -c -- '--- SKIP:' test.log || true)
+          echo "packages ok $(grep -c '^ok ' test.log || true), FAIL $(grep -c '^FAIL' test.log || true), no test files $(grep -c 'no test files' test.log || true)"
+          echo "tests and subtests: passed $pass, failed $fail, skipped $skip"
+          [ "$pass" -gt 0 ] && [ "$fail" -eq 0 ] && [ "$skip" -eq 0 ]
       - uses: actions/upload-artifact@v4
         if: always()
         with:

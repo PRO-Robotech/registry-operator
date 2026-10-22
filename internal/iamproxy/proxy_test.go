@@ -303,6 +303,32 @@ func TestProxy_RightsTable(t *testing.T) {
 	}
 }
 
+// Push нового репозитория начинается с проверки блобов (HEAD): у
+// субъекта с правом создания она отвечает «не найдено», не обращаясь к
+// zot; без права создания — отказ.
+func TestProxy_PushOfANewRepositoryStartsWithBlobChecks(t *testing.T) {
+	const subject = "service_account:sva1"
+	e := newEnv(t, false)
+	e.fake.AddGrant(kanametest.Grant{Subject: subject, Role: kanametest.RolePusher, Registry: regID})
+	tok := e.token(subject, nil)
+	head := "/v2/" + regID + "/team/fresh/blobs/sha256:" + strings.Repeat("a", 64)
+	if resp := e.do(http.MethodHead, head, tok); resp.StatusCode != http.StatusNotFound || e.zot.count() != 0 {
+		t.Fatalf("blob check in a new repository: %d, zot %d", resp.StatusCode, e.zot.count())
+	}
+	if resp := e.do(http.MethodPost, newPush, tok); resp.StatusCode != http.StatusOK {
+		t.Fatalf("upload start: %d", resp.StatusCode)
+	}
+	// Репозиторий записан: проверка блоба идёт в zot по праву чтения.
+	if resp := e.do(http.MethodHead, head, tok); resp.StatusCode != http.StatusOK || e.zot.count() != 2 {
+		t.Fatalf("blob check after the enrollment: %d, zot %d", resp.StatusCode, e.zot.count())
+	}
+	puller := e.token("user:usr7", nil)
+	e.fake.AddGrant(kanametest.Grant{Subject: "user:usr7", Role: kanametest.RolePuller, Registry: otherReg})
+	if resp := e.do(http.MethodHead, "/v2/"+regID+"/team/other/blobs/sha256:"+strings.Repeat("b", 64), puller); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("blob check without the create right: %d", resp.StatusCode)
+	}
+}
+
 // F3: записанный пустой репозиторий не «новый» — права создания мало.
 func TestProxy_RegisteredEmptyRepositoryIsNotOpenedByCreateRight(t *testing.T) {
 	e := newEnv(t, false)
@@ -312,6 +338,10 @@ func TestProxy_RegisteredEmptyRepositoryIsNotOpenedByCreateRight(t *testing.T) {
 	resp := e.do(http.MethodPost, "/v2/"+regID+"/team/empty/blobs/uploads/", tok)
 	if resp.StatusCode != http.StatusForbidden || e.zot.count() != 0 {
 		t.Fatalf("create-only subject wrote into a registered repository: %d, zot %d", resp.StatusCode, e.zot.count())
+	}
+	// И не читает из него: чтение без права — «не найдено», zot не спрошен.
+	if resp := e.do(http.MethodGet, "/v2/"+regID+"/team/empty/manifests/latest", tok); resp.StatusCode != http.StatusNotFound || e.zot.count() != 0 {
+		t.Fatalf("create-only subject read a registered repository: %d, zot %d", resp.StatusCode, e.zot.count())
 	}
 	// Близнец: незаписанный репозиторий тем же правом заводится.
 	if resp := e.do(http.MethodPost, newPush, tok); resp.StatusCode != http.StatusOK {
@@ -433,6 +463,28 @@ func TestProxy_RefusesInvalidTokens(t *testing.T) {
 	}
 	if e.zot.count() != 0 {
 		t.Fatalf("an invalid token reached zot %d times", e.zot.count())
+	}
+}
+
+// Токен подписан издателем, но kaname его не признаёт (как токен докер-
+// контура без утверждений принципала): решения нет — 401, а не доступ и
+// не запрос к zot.
+func TestProxy_TokenKanameDoesNotAuthenticateIsNotAnAllow(t *testing.T) {
+	e := newEnv(t, false)
+	e.registerRepo("team/app")
+	e.fake.AddGrant(kanametest.Grant{Subject: "service_account:sva1", Role: kanametest.RolePusher, Registry: regID})
+	tok := e.token("service_account:sva1", nil)
+	e.fake.AddToken(tok, "service_account:other")
+	if resp := e.do(http.MethodGet, pullPath, tok); resp.StatusCode != http.StatusForbidden && resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("subject mismatch: %d", resp.StatusCode)
+	}
+	unknown := e.token("service_account:sva1", func(c jwt.MapClaims, _ map[string]any) { c["jti"] = "fresh" })
+	e.fake.AddToken(unknown, "")
+	if resp := e.do(http.MethodGet, pullPath, unknown); resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("token kaname does not know: %d", resp.StatusCode)
+	}
+	if e.zot.count() != 0 {
+		t.Fatal("a token kaname refused reached zot")
 	}
 }
 
@@ -567,4 +619,27 @@ func (f checkerFunc) Check(ctx context.Context, id iamproxy.Identity, verb, obje
 		return false, errors.New("unused")
 	}
 	return f(ctx, id, verb, object)
+}
+
+// zot недоступен — фиксированный 502 без подробностей соединения.
+func TestProxy_UpstreamDownIsAFixedBadGateway(t *testing.T) {
+	tok := "tok"
+	p, err := iamproxy.New(iamproxy.Options{
+		RegistryID: regID, Upstream: &url.URL{Scheme: "http", Host: "127.0.0.1:1"},
+		Verifier: verifierFunc(func(context.Context, string) (iamproxy.Identity, error) {
+			return iamproxy.Identity{Subject: "service_account:sva1", Token: tok}, nil
+		}),
+		Checker:  checkerFunc(func(context.Context, iamproxy.Identity, string, string) (bool, error) { return true, nil }),
+		Enroller: &enroller{}, Realm: "r", Service: "registry", Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, pullPath, nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	p.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadGateway || strings.Contains(rec.Body.String(), "127.0.0.1") || strings.Contains(rec.Body.String(), "refused") {
+		t.Fatalf("got %d %s", rec.Code, rec.Body.String())
+	}
 }

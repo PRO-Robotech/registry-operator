@@ -52,7 +52,7 @@ injections:
   - name: public-registry-accepts-anonymous-push
     file: internal/iamproxy/proxy.go
     old: "if read && p.o.Public {"
-    new: "if p.o.Public {"
+    new: "if (read || p.o.Public) && p.o.Public {"
     package: ./internal/iamproxy/
     tests: [TestProxy_AnonymousAccess]
   - name: client-credentials-forwarded-to-zot

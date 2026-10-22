@@ -56,7 +56,7 @@ func registryVersion(reg *registryv1alpha1.Registry) time.Time {
 	return kaname.Version(reg.CreationTimestamp.Time, reg.Generation)
 }
 
-func (r *RegistryReconciler) ledger() *ledger.Store {
+func (r *RegistryReconciler) reservations() *ledger.Store {
 	return &ledger.Store{Client: r.Client, Reader: r.APIReader}
 }
 
@@ -78,7 +78,7 @@ func (r *RegistryReconciler) ensureRegistration(ctx context.Context, p *pass, sc
 
 	// Намерение — до вызова: проект закреплён раньше, чем запись в IAM
 	// может состояться, и снятие всегда знает, под чем снимать.
-	res, err := r.ledger().Mutate(ctx, reg.Spec.ID, func(res *registryv1alpha1.RegistryIDReservation) error {
+	res, err := r.reservations().Mutate(ctx, reg.Spec.ID, func(res *registryv1alpha1.RegistryIDReservation) error {
 		if err := ownReservation(res, reg); err != nil {
 			return err
 		}
@@ -101,7 +101,7 @@ func (r *RegistryReconciler) ensureRegistration(ctx context.Context, p *pass, sc
 		return false, err
 	}
 	now := metav1.NewTime(p.now)
-	res, err = r.ledger().Mutate(ctx, reg.Spec.ID, func(res *registryv1alpha1.RegistryIDReservation) error {
+	res, err = r.reservations().Mutate(ctx, reg.Spec.ID, func(res *registryv1alpha1.RegistryIDReservation) error {
 		if err := ownReservation(res, reg); err != nil {
 			return err
 		}
@@ -113,10 +113,8 @@ func (r *RegistryReconciler) ensureRegistration(ctx context.Context, p *pass, sc
 		return false, err
 	}
 	p.reservation = res
-	if !allRepositoriesRegistered(res) {
-		p.registration = &registryv1alpha1.RegistrationStatus{Object: obj, Reason: registryv1alpha1.ReasonRegistrationPending}
-		return false, nil
-	}
+	// Неподтверждённый репозиторий описи шаг не держит: регистри записан, а
+	// повтор по репозиторию идёт каждым проходом и виден в диагностике.
 	p.registration = &registryv1alpha1.RegistrationStatus{Object: obj, Ready: true, Reason: registryv1alpha1.ReasonRegistered}
 	metrics.Registrations.WithLabelValues("registered").Inc()
 	return true, nil
@@ -167,7 +165,7 @@ func (r *RegistryReconciler) retryRepositories(ctx context.Context, p *pass, sco
 	if len(done) == 0 {
 		return nil
 	}
-	res, err := r.ledger().Mutate(ctx, reg.Spec.ID, func(res *registryv1alpha1.RegistryIDReservation) error {
+	res, err := r.reservations().Mutate(ctx, reg.Spec.ID, func(res *registryv1alpha1.RegistryIDReservation) error {
 		if err := ownReservation(res, reg); err != nil {
 			return err
 		}
@@ -225,7 +223,7 @@ func (r *RegistryReconciler) unregisterAll(ctx context.Context, p *pass) (bool, 
 	// закончиться в свой срок.
 	if rec.ClosingAt == nil {
 		now := metav1.NewTime(p.now)
-		res, err := r.ledger().Mutate(ctx, reg.Spec.ID, func(res *registryv1alpha1.RegistryIDReservation) error {
+		res, err := r.reservations().Mutate(ctx, reg.Spec.ID, func(res *registryv1alpha1.RegistryIDReservation) error {
 			if err := ownReservation(res, reg); err != nil {
 				return err
 			}
@@ -273,7 +271,7 @@ func (r *RegistryReconciler) unregisterAll(ctx context.Context, p *pass) (bool, 
 		}
 		removed = append(removed, repo.Name)
 	}
-	res, err := r.ledger().Mutate(ctx, reg.Spec.ID, func(res *registryv1alpha1.RegistryIDReservation) error {
+	res, err := r.reservations().Mutate(ctx, reg.Spec.ID, func(res *registryv1alpha1.RegistryIDReservation) error {
 		if err := ownReservation(res, reg); err != nil {
 			return err
 		}

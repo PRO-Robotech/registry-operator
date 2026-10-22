@@ -327,7 +327,7 @@ func (s *authorizeServer) Check(ctx context.Context, req *iamv1.AuthorizeCheckRe
 		token, _ = strings.CutPrefix(v[0], "Bearer ")
 	}
 	caller, ok := f.tokens[token]
-	if !ok || token == "" {
+	if !ok || token == "" || caller == "" {
 		return nil, status.Error(codes.Unauthenticated, "unauthenticated")
 	}
 	if req.GetSubject() != caller {

@@ -59,7 +59,7 @@ func consistently(t *testing.T, d time.Duration, what string, f func() error) {
 func ctx() context.Context { return context.Background() }
 
 // order — заказ регистри id в namespace ns.
-func order(t *testing.T, ns, id string, edit func(*registryv1alpha1.Registry)) *registryv1alpha1.Registry {
+func order(t *testing.T, ns, id string, edit func(*registryv1alpha1.Registry)) {
 	t.Helper()
 	reg := &registryv1alpha1.Registry{
 		ObjectMeta: metav1.ObjectMeta{Name: id, Namespace: ns},
@@ -71,7 +71,6 @@ func order(t *testing.T, ns, id string, edit func(*registryv1alpha1.Registry)) *
 	if err := k8s.Create(ctx(), reg); err != nil {
 		t.Fatal(err)
 	}
-	return reg
 }
 
 // child — ожидаемый объект шага заказа id в ns.

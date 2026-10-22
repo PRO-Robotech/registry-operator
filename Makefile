@@ -55,7 +55,7 @@ crds: ## Целевые CRD проб envtest по hack/crds.lock.
 test: crds $(ENVTEST) ## Unit и envtest (с -race).
 	KUBEBUILDER_ASSETS="$$("$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" \
 	REGOP_TEST_CRDS="$(LOCALBIN)/crds" \
-	go test -race -count=1 $$(go list ./... | grep -v /test/e2e) -coverprofile cover.out
+	go test -race -count=1 -v $$(go list ./... | grep -v /test/e2e) -coverprofile cover.out
 
 .PHONY: inject
 inject: crds $(ENVTEST) ## Таблица инъекций: каждая проба способна упасть.

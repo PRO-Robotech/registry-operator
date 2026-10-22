@@ -62,7 +62,7 @@ func NewOperatorEnroller(base, registryID, tokenFile string, hc *http.Client) (*
 // Enroll — заявка; nil — репозиторий записан и субъект вправе писать в
 // него как заявивший.
 func (e *OperatorEnroller) Enroll(ctx context.Context, repository, subject string) error {
-	token, err := os.ReadFile(e.TokenFile)
+	token, err := os.ReadFile(e.TokenFile) //nolint:gosec // путь — флаг запуска (projected-токен пода).
 	if err != nil {
 		return fmt.Errorf("%w: read token: %v", ErrEnrollUnavailable, err)
 	}
@@ -71,17 +71,18 @@ func (e *OperatorEnroller) Enroll(ctx context.Context, repository, subject strin
 		return err
 	}
 	path := strings.Replace(api.Path, "{id}", url.PathEscape(e.RegistryID), 1)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.URL+path, bytes.NewReader(body))
+	// Адрес — флаг запуска (только https), а не вход запроса.
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.URL+path, bytes.NewReader(body)) //nolint:gosec // см. выше.
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(token)))
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := e.HTTPClient.Do(req)
+	resp, err := e.HTTPClient.Do(req) //nolint:gosec // адрес — флаг запуска, только https.
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrEnrollUnavailable, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
 	switch resp.StatusCode {
 	case http.StatusCreated, http.StatusOK:

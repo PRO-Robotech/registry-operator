@@ -206,10 +206,10 @@ func TestE2E_OrderThroughTheWholePipelineAndBack(t *testing.T) {
 		t.Fatalf("E2E_OPERATOR_IMAGE must be repository@sha256:…, got %s", opImage)
 	}
 	values := map[string]any{
-		"image":    map[string]any{"repository": repo, "tag": "e2e", "digest": digest},
-		"replicas": 1,
-		"config":   c,
-		"kaname":   map[string]any{"certificate": map[string]any{"create": false}},
+		"image":      map[string]any{"repository": repo, "tag": "e2e", "digest": digest},
+		"replicas":   1,
+		"config":     c,
+		"kaname":     map[string]any{"certificate": map[string]any{"create": false}},
 		"enrollment": map[string]any{"certificate": map[string]any{"create": false}},
 	}
 	vb, _ := yaml.Marshal(values)

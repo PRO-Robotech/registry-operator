@@ -171,10 +171,15 @@ const (
 	denied
 	limited
 	unavailable
+	// unknown — чтение в репозитории, которого субъект не видит, но вправе
+	// завести: ответ «не найдено» без обращения к zot. Так push нового
+	// репозитория проходит проверку существования блобов (HEAD), а субъект
+	// с одним правом создания из записанного репозитория не читает ничего.
+	unknown
 )
 
 func (v verdict) String() string {
-	return [...]string{"allow", "unauthenticated", "denied", "limited", "unavailable"}[v]
+	return [...]string{"allow", "unauthenticated", "denied", "limited", "unavailable", "unknown"}[v]
 }
 
 // ServeHTTP — решение и проксирование.
@@ -199,6 +204,9 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	case unavailable:
 		writeError(w, http.StatusServiceUnavailable, "UNAVAILABLE", "authorization is unavailable, retry later", "")
+		return
+	case unknown:
+		writeError(w, http.StatusNotFound, "NAME_UNKNOWN", "repository name not known to registry", "")
 		return
 	}
 	if rt.ForeignMount || (rt.MountFrom != "" && !keepMount) {
@@ -266,16 +274,19 @@ func (p *Proxy) decide(r *http.Request, rt Route) (verdict, bool) {
 	ctx := r.Context()
 	repo := kaname.RepositoryObject(p.o.RegistryID, rt.Repository)
 	switch rt.Action {
-	case ActionPull:
+	case ActionPull, ActionList:
 		if p.o.Public {
 			return allow, false
 		}
-		return p.check(ctx, *id, VerbGet, repo), false
-	case ActionList:
-		if p.o.Public {
-			return allow, false
+		verb := VerbGet
+		if rt.Action == ActionList {
+			verb = VerbList
 		}
-		return p.check(ctx, *id, VerbList, repo), false
+		v := p.check(ctx, *id, verb, repo)
+		if v == denied && p.check(ctx, *id, VerbCreate, kaname.RegistryObject(p.o.RegistryID)) == allow {
+			return unknown, false
+		}
+		return v, false
 	case ActionDelete:
 		return p.check(ctx, *id, VerbDelete, repo), false
 	case ActionPush:

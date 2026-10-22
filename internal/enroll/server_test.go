@@ -143,7 +143,7 @@ func (e *env) post(token, id, repo, subject string) (int, string) {
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var out api.Response
 	_ = json.NewDecoder(resp.Body).Decode(&out)
 	return resp.StatusCode, out.Outcome

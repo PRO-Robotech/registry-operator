@@ -214,7 +214,7 @@ func (v *HTTPVerifier) anonymousToken(ctx context.Context, challenge, repo strin
 	if err != nil || realm.Host == "" {
 		return "", fmt.Errorf("%w: bearer realm %q is not a URL", ErrUnreachable, params["realm"])
 	}
-	if realm.Scheme != "https" && !(realm.Scheme == "http" && v.PlainHTTPHosts[realm.Host]) {
+	if realm.Scheme != "https" && (realm.Scheme != "http" || !v.PlainHTTPHosts[realm.Host]) {
 		return "", fmt.Errorf("%w: bearer realm must be https", ErrUnreachable)
 	}
 	scope := "repository:" + repo + ":pull"
