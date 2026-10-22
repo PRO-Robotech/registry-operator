@@ -50,11 +50,9 @@ site:
     # Аудитория projected-токена SA пода для входа vault-agent; равна audience роли.
     tokenAudience: vault
   kaname:
-    # Публичный gRPC kaname (host:port): AuthorizeService.Check токеном клиента «о себе»;
-    # внутренний листенер :9091 схема отвергает.
-    address: ""
-    # Имя в сертификате публичного gRPC kaname.
-    serverName: ""
+    # Публичный REST-фронт kaname (https://host[:port] без пути): AuthorizeService.Check
+    # токеном клиента «о себе»; внутренний листенер :9091 схема отвергает.
+    url: ""
     # Набор ключей kaname (JWKS); только https.
     jwksURL: ""
     # iss токенов kaname, которые принимает прокси.
@@ -75,10 +73,6 @@ site:
     checkTimeout: ""
     # Дедлайн одной заявки на регистрацию: 1s–60s.
     enrollTimeout: ""
-    # Куда клиент docker идёт за токеном (WWW-Authenticate realm): выдача /iam/token края.
-    realm: ""
-    # service в запросе токена клиента.
-    service: ""
   images:
     zot:
       repository: ghcr.io/project-zot/zot-linux-amd64
@@ -108,7 +102,7 @@ site:
     # Пиры выхода: {fqdn, ports} | {namespace, labels, ports} | {cidr, ports}.
     # Выход в S3 выводится из storage.endpoint и здесь не задаётся.
     vault: []
-    # Публичный gRPC kaname (Check) и JWKS; внутренний листенер :9091 запрещён.
+    # Публичный REST-фронт kaname (Check) и JWKS; внутренний листенер :9091 запрещён.
     kaname: []
     # Эндпоинт регистрации registry-operator.
     registryOperator: []

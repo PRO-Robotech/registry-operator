@@ -99,12 +99,17 @@ resources:
 # предков [registry_registry:<id>, project:<prj>]. Класса create на регистри роль модуля не
 # несёт: kaname его ролью модуля не выдаёт (ни одно действие каталога прав его не спрашивает),
 # поэтому заведение репозитория в регистри iam-proxy судит глаголом update на регистри.
+# Выдачу на один репозиторий (цель registry.repositories:<id>/<repo>) kaname принимает,
+# только если тип цели покрыт правилом ВЕРХНЕГО уровня роли: вложенное правило его не
+# покрывает. Поэтому у puller и pusher второе верхнее правило — на репозитории, с теми же
+# классами, что у вложенного; admin точечно на репозиторий не выдаётся.
 roles:
 
   - id: registry.puller
     description: >
       Чтение образов: регистри, названный целью выдачи, и каждый его
-      репозиторий, включая заведённые позже.
+      репозиторий, включая заведённые позже, либо один репозиторий,
+      названный целью выдачи.
     tier: {tierType: iam.cluster, tierId: cluster_root}
     rules:
       - module: registry
@@ -113,11 +118,15 @@ roles:
         children:
           - resources: [repositories]
             classes: [get, list]
+      - module: registry
+        resources: [repositories]
+        classes: [get, list]
 
   - id: registry.pusher
     description: >
       Публикация и чтение образов: новые репозитории в регистри, названном
-      целью выдачи, и запись в каждый его репозиторий.
+      целью выдачи, и запись в каждый его репозиторий, либо запись в один
+      репозиторий, названный целью выдачи.
     tier: {tierType: iam.cluster, tierId: cluster_root}
     rules:
       - module: registry
@@ -126,6 +135,9 @@ roles:
         children:
           - resources: [repositories]
             classes: [get, list, update]
+      - module: registry
+        resources: [repositories]
+        classes: [get, list, update]
 
   - id: registry.admin
     description: >

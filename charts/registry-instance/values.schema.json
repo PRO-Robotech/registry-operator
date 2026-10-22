@@ -33,6 +33,19 @@
       "maxLength": 260,
       "pattern": "^https://([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(:[0-9]{1,5})?$"
     },
+    "kanameURL": {
+      "description": "https://<dns-name>[:port] of the public REST front of kaname (AuthorizeService.Check), without a path; the internal listener :9091 is never reachable from the data plane.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/httpsOrigin"
+        },
+        {
+          "not": {
+            "pattern": ":9091$"
+          }
+        }
+      ]
+    },
     "vaultPath": {
       "type": "string",
       "maxLength": 512,
@@ -274,15 +287,6 @@
       "type": "string",
       "pattern": "^([1-9]|10)s$"
     },
-    "grpcAddress": {
-      "description": "host:port of the public kaname gRPC; the internal listener :9091 is never reachable from the data plane.",
-      "type": "string",
-      "maxLength": 260,
-      "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?:[0-9]{1,5}$",
-      "not": {
-        "pattern": ":9091$"
-      }
-    },
     "deadline": {
       "description": "Deadline of one outbound call, whole seconds.",
       "type": "string",
@@ -425,18 +429,14 @@
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "address",
-            "serverName",
+            "url",
             "jwksURL",
             "issuer",
             "audience"
           ],
           "properties": {
-            "address": {
-              "$ref": "#/definitions/grpcAddress"
-            },
-            "serverName": {
-              "$ref": "#/definitions/dnsName"
+            "url": {
+              "$ref": "#/definitions/kanameURL"
             },
             "jwksURL": {
               "$ref": "#/definitions/httpsURL"
@@ -472,9 +472,7 @@
           "required": [
             "decisionCacheTTL",
             "checkTimeout",
-            "enrollTimeout",
-            "realm",
-            "service"
+            "enrollTimeout"
           ],
           "properties": {
             "decisionCacheTTL": {
@@ -501,12 +499,6 @@
                   "pattern": "^([1-9]|[1-5][0-9]|60)s$"
                 }
               ]
-            },
-            "realm": {
-              "$ref": "#/definitions/httpsURL"
-            },
-            "service": {
-              "$ref": "#/definitions/dnsName"
             }
           }
         },

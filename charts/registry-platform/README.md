@@ -88,13 +88,17 @@ Gateway API, которых ещё нет. При установке `helm insta
   канона побайтово, иначе kaname отказывает в пуске. Это судит задание CI `kaname-manifest`:
   доставка из рендера чарта проходит чтение, композицию модели, допуск и суд ролей kaname.
 - **Роли** — правило верхнего уровня на регистри и вложенное (`children`) на каждый его
-  репозиторий, включая созданные позже:
+  репозиторий, включая созданные позже. У `registry.puller` и `registry.pusher` второе правило
+  верхнего уровня — на репозитории, с теми же классами: выдачу на один репозиторий (цель
+  `registry.repositories:<id>/<repo>`) kaname принимает, только если тип цели покрыт правилом
+  верхнего уровня роли, вложенное его не покрывает. `registry.admin` точечно на репозиторий не
+  выдаётся.
 
-  | роль | регистри | репозитории |
-  |---|---|---|
-  | `registry.puller` | get | get, list |
-  | `registry.pusher` | get, update | get, list, update |
-  | `registry.admin` | get, list, update, delete | get, list, update, delete |
+  | роль | регистри | репозитории регистри (`children`) | один репозиторий целью выдачи |
+  |---|---|---|---|
+  | `registry.puller` | get | get, list | get, list |
+  | `registry.pusher` | get, update | get, list, update | get, list, update |
+  | `registry.admin` | get, list, update, delete | get, list, update, delete | — |
 
   Класса `create` на регистри у ролей нет: kaname ролью модуля его не выдаёт (ни одно действие
   каталога прав его не спрашивает, суд ролей отказывает). Заведение репозитория в регистри —
@@ -105,7 +109,11 @@ Gateway API, которых ещё нет. При установке `helm insta
   её выдаёт платформа или владелец аккаунта, не оператор.
 - **Публичного чтения модуль не объявляет.** Анонимный pull включает только флаг `--public`
   iam-proxy (переменная заказа `public`); кортежей с подстановочным субъектом и выдач
-  системным классам `anonymous` и `authenticated` registry-operator не пишет (V1 их отвергает).
+  системным классам `anonymous` и `authenticated` registry-operator не пишет. Выдачу другого
+  писателя отвергает политика V1 — по содержимому выдачи (роль модуля `registry` либо цель
+  `registry.*`), под любым именем и в любом namespace. V1, как и все политики допуска, по
+  умолчанию выключена (ниже): пока она выключена, такую выдачу писателя помимо
+  registry-operator чарт не отвергает.
 - **Личность модуля** `kacho-registry` в аккаунте `kanameModule.systemAccount` и её вступление
   в `module-relation-writers`. Под ней registry-operator — единственный писатель типов
   `registry_*` — регистрирует ресурсы (`RegisterResource` на внутреннем листенере kaname по mTLS).
@@ -122,7 +130,7 @@ ConfigMap `<release>-admission` в `admission.paramsNamespace`, без пара�
 
 | | объект | правило |
 |---|---|---|
-| V1 | `iam.kaname.in-cloud.io` ServiceAccount, AccessBinding `zot-*` | пишет только registry-operator; выдача — роль из `admission.allowedRoles` (только роли манифеста модуля) на `registry.registries:<свой id>` своим роботам; субъект системного класса (`anonymous`, `authenticated`) — отказ |
+| V1 | `iam.kaname.in-cloud.io` ServiceAccount и AccessBinding с именем `zot-*`; AccessBinding с ролью модуля `registry` (`registry.*`) либо с целью `registry.*` — под любым именем, в любом namespace | объекты `zot-*` пишет только registry-operator; его выдача — роль из `admission.allowedRoles` (только роли манифеста модуля) на `registry.registries:<свой id>` своим роботам; субъект системного класса (`anonymous`, `authenticated`) либо подстановочный (`*`) в выдаче регистри — отказ любому писателю, платформе тоже. Выдача регистри пользователю или группе под своим именем — не предмет V1 |
 | V2 | `registries/status`, `registryidreservations/status` | только registry-operator — единственный их писатель |
 | V3 | `HTTPRoute` с именем `zot-*` либо со ссылкой на `Service zot-*` | только registry-operator; `/v2/<id>/` на хосте и Gateway регистри к `Service zot-<id>:8080` своего арендатора. Ссылка судится наравне с именем: ReferenceGrant экземпляра открывает `zot-<id>` любому маршруту namespace края |
 | V4 | поды с SA `zot-*` | создаёт только replicaset-controller |

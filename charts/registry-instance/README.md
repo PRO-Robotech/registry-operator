@@ -122,7 +122,7 @@ update, delete), затем заявка на регистрацию. `Authoriza
 | выход | DNS (`site.network.dns`), только имена S3, Vault, kaname и эндпоинта регистрации | UDP/TCP 53 |
 | выход | S3 заказа — хост и порт из `storage.endpoint` | TCP (443 по умолчанию) |
 | выход | Vault — `site.network.vault` | порты пира |
-| выход | публичный gRPC kaname (Check) и JWKS — `site.network.kaname` | порты пира, кроме 9091 |
+| выход | публичный REST-фронт kaname (Check) и JWKS — `site.network.kaname` | порты пира, кроме 9091 |
 | выход | эндпоинт регистрации registry-operator — `site.network.registryOperator` | порты пира |
 
 Внутренний листенер kaname `:9091` из плоскости данных недостижим: схема отвергает такой порт.
@@ -180,15 +180,13 @@ update, delete), затем заявка на регистрацию. `Authoriza
 | `site.caBundle.{configMap,key}` | ConfigMap с CA Vault, публичного API kaname и эндпоинта регистрации в namespace арендатора |
 | `site.vault.address` | `https://` Vault для vault-agent |
 | `site.vault.tokenAudience` | аудитория projected-токена vault-agent; равна `audience` роли Vault заказа |
-| `site.kaname.address` | `host:port` публичного gRPC kaname (Check); не `:9091` |
-| `site.kaname.serverName` | имя в сертификате публичного gRPC kaname |
+| `site.kaname.url` | `https://host[:port]` публичного REST-фронта kaname (Check), без пути; не `:9091` |
 | `site.kaname.jwksURL` | `https://` набора ключей kaname |
 | `site.kaname.{issuer,audience}` | `iss` и `aud` принимаемых токенов |
 | `site.registryOperator.registrationURL` | `https://host[:port]` эндпоинта регистрации registry-operator, без пути |
 | `site.registryOperator.tokenAudience` | аудитория projected-токена заявки; отлична от аудитории Vault |
 | `site.iamProxy.decisionCacheTTL` | окно кэша вердиктов, `1s`…`10s` |
 | `site.iamProxy.{checkTimeout,enrollTimeout}` | дедлайны Check (`1s`…`30s`) и заявки (`1s`…`60s`) |
-| `site.iamProxy.{realm,service}` | `realm` (`https://`, выдача `/iam/token` края) и `service` в `WWW-Authenticate` |
 | `site.images.{zot,iamProxy}` | `repository`, `tag`, `digest` (обязателен) |
 | `site.edge.routeNamespace` | namespace маршрутов края: единственный источник, которому `ReferenceGrant` открывает `Service zot-<id>`; равен `admission.routeNamespace` платформы |
 | `site.edge.proxy` | namespace прокси Envoy Gateway и `gateway.{name,namespace}` |

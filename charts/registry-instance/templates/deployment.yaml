@@ -4,7 +4,8 @@
 ---
 # zot слушает только 127.0.0.1:5000 и хранит данные только в S3; снаружи пода
 # доступен лишь iam-proxy: он проверяет JWT клиента и спрашивает право публичным
-# AuthorizeService.Check токеном самого клиента «о себе» — своих прав в IAM у прокси нет.
+# AuthorizeService.Check (REST-фронт kaname) токеном самого клиента «о себе» — своих прав в
+# IAM у прокси нет.
 # config.json zot рендерит init vault-agent до старта zot (повторяет, пока лист с
 # ключами бакета не появится); ключи видит только контейнер zot. Сетевая политика
 # пода — волной раньше.
@@ -101,8 +102,7 @@ spec:
             - {{ printf "--jwks-ca=%s" $caPath | toJson }}
             - {{ printf "--issuer=%s" .Values.site.kaname.issuer | toJson }}
             - {{ printf "--audience=%s" .Values.site.kaname.audience | toJson }}
-            - {{ printf "--kaname-address=%s" .Values.site.kaname.address | toJson }}
-            - {{ printf "--kaname-server-name=%s" .Values.site.kaname.serverName | toJson }}
+            - {{ printf "--kaname-url=%s" .Values.site.kaname.url | toJson }}
             - {{ printf "--kaname-ca=%s" $caPath | toJson }}
             - {{ printf "--check-timeout=%s" .Values.site.iamProxy.checkTimeout | toJson }}
             - {{ printf "--cache-ttl=%s" .Values.site.iamProxy.decisionCacheTTL | toJson }}
@@ -110,8 +110,6 @@ spec:
             - {{ printf "--enroll-ca=%s" $caPath | toJson }}
             - {{ printf "--enroll-token-file=%s/token" $tokenDir | toJson }}
             - {{ printf "--enroll-timeout=%s" .Values.site.iamProxy.enrollTimeout | toJson }}
-            - {{ printf "--realm=%s" .Values.site.iamProxy.realm | toJson }}
-            - {{ printf "--service=%s" .Values.site.iamProxy.service | toJson }}
           ports:
             - name: proxy
               containerPort: 8080
