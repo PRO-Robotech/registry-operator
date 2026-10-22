@@ -432,9 +432,15 @@ func (f *Fake) ServeOn(serverCert tls.Certificate, clientCA *x509.CertPool, inte
 		ClientAuth:   tls.RequireAndVerifyClientCert,
 	})))
 	iamv1.RegisterInternalIAMServiceServer(internal, &internalServer{f: f})
+	// Публичный gRPC kaname требует проверенный клиентский лист
+	// (corelib grpcsrv/tls.go, RequireAndVerifyClientCert): двойник не
+	// снисходительнее продукта, иначе проба зеленеет на пути, которого у
+	// клиента с одним токеном нет.
 	public := grpc.NewServer(grpc.Creds(credentials.NewTLS(&tls.Config{
 		MinVersion:   tls.VersionTLS12,
 		Certificates: []tls.Certificate{serverCert},
+		ClientCAs:    clientCA,
+		ClientAuth:   tls.RequireAndVerifyClientCert,
 	})))
 	iamv1.RegisterAuthorizeServiceServer(public, &authorizeServer{f: f})
 	go func() { _ = internal.Serve(internalLn) }()
