@@ -94,6 +94,24 @@ jobs:
           set -e
           [ $code -ne 0 ] && grep -q 'image.tag and image.digest' <<<"$out"
 
+  zot:
+    name: iam-proxy in front of a real zot
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: zot
+        run: |
+          docker run -d --name zot -p 127.0.0.1:5000:5000 ghcr.io/project-zot/zot-linux-amd64:v2.1.20@sha256:95a837a0afacf5b7edc0c92493f04beee6891989b8d2fd50a00cf65a1e6d4fd5
+          for i in 1 2 3 4 5 6 7 8 9 10; do curl -fsS http://127.0.0.1:5000/v2/ >/dev/null && break; sleep 3; done
+          curl -fsS http://127.0.0.1:5000/v2/
+      - run: ZOT_URL=http://127.0.0.1:5000 go test -tags=integration -count=1 -race -v ./test/integration/
+      - name: zot log
+        if: failure()
+        run: docker logs zot | tail -100
+
   kind-e2e:
     name: kind e2e (operator under its own role)
     runs-on: ubuntu-latest

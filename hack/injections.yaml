@@ -121,3 +121,9 @@ injections:
     new: "  resources:\n  - namespaces\n  - secrets\n  verbs:\n  - create\n  - get\n"
     package: ./internal/kinds/
     tests: [TestClusterRole_WritesOnlyTheSixKinds]
+  - name: denials-cached
+    file: internal/iamproxy/authz.go
+    old: "if err != nil || !allowed {"
+    new: "if err != nil {"
+    package: ./internal/iamproxy/
+    tests: [TestCachedChecker_KeyIsTheTokenAndWritesBypass, TestProxy_PushOfANewRepositoryStartsWithBlobChecks]

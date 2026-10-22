@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -53,6 +54,7 @@ func TestMain(m *testing.M) {
 }
 
 func run(m *testing.M) int {
+	ctrl.SetLogger(logr.Discard())
 	crds := os.Getenv("REGOP_TEST_CRDS")
 	if crds == "" {
 		crds = filepath.Join("..", "..", "bin", "crds")

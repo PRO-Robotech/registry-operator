@@ -4,6 +4,7 @@ go 1.26.8
 
 require (
 	github.com/PRO-Robotech/kaname v0.5.0
+	github.com/go-logr/logr v1.4.4
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/prometheus/client_golang v1.24.1
 	golang.org/x/time v0.16.0
@@ -26,7 +27,6 @@ require (
 	github.com/evanphx/json-patch/v5 v5.9.11 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.1 // indirect
-	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/zapr v1.3.0 // indirect
 	github.com/go-openapi/jsonpointer v1.0.0 // indirect
 	github.com/go-openapi/jsonreference v1.0.0 // indirect
