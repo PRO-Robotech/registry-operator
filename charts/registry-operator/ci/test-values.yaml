@@ -54,7 +54,8 @@ config:
         required:
         - FailOnSharedResource=true
       maxRetryLimit: 10
-      valuesAddonPrefix: registry-platform
+      # Слои order и site чарта registry-platform (addons.in-cloud.io/addon = его addonName).
+      valuesAddonPrefix: registry-instance
       templateVariables:
       - bucket
       - endpoint
