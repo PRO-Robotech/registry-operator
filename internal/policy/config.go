@@ -61,7 +61,7 @@ type SecretsPolicy struct {
 	RolePolicies []string `json:"rolePolicies,omitempty"`
 }
 
-// IdentityPolicy — форма iam ServiceAccount и AccessBinding (VAP V1).
+// IdentityPolicy — форма IAMServiceAccount и IAMAccessBinding (VAP V1).
 type IdentityPolicy struct {
 	// AllowedRoles — роли, которые выдача вправе называть для учётки заказа.
 	AllowedRoles []string `json:"allowedRoles"`

@@ -158,8 +158,8 @@ metadata: {name: not-a-crd}
 }
 
 // Виды kaname — с префиксом IAM (указание владельца 2026-10-22: «не имя а
-// kind», «IAMServiceAccount ок другим тоже префиксы добавь»); прежних имён
-// ServiceAccount и AccessBinding в группе iam.kaname.in-cloud.io нет.
+// kind», «IAMServiceAccount ок другим тоже префиксы добавь»); видов группы
+// kaname без этого префикса оператор не пишет.
 func TestKanameKinds_CarryTheIAMPrefix(t *testing.T) {
 	want := []struct {
 		got      Kind

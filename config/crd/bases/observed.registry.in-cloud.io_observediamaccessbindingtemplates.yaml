@@ -31,7 +31,7 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: ObservedIamAccessBindingTemplate — шаблон spec iam AccessBinding
+        description: ObservedIamAccessBindingTemplate — шаблон spec IAMAccessBinding
           заказа.
         properties:
           apiVersion:

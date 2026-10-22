@@ -44,7 +44,7 @@ type Step string
 const (
 	// StepStorage — S3BucketClaim: бакет и его ключи в Vault.
 	StepStorage Step = "storage"
-	// StepIdentity — iam ServiceAccount: учётка CI-робота в kaname.
+	// StepIdentity — IAMServiceAccount: учётка CI-робота в kaname.
 	StepIdentity Step = "identity"
 	// StepSecrets — VaultClaim: роль Vault для k8s ServiceAccount zot.
 	StepSecrets Step = "secrets"
@@ -52,7 +52,7 @@ const (
 	// кортеж с цепью предков пишет сам оператор (служба registry), шаблона у
 	// шага нет.
 	StepRegistration Step = "registration"
-	// StepAccess — iam AccessBinding: выдача роли учётке на реестр.
+	// StepAccess — IAMAccessBinding: выдача роли учётке на реестр.
 	StepAccess Step = "access"
 	// StepWorkload — Addon: zot с нужными путями.
 	StepWorkload Step = "workload"

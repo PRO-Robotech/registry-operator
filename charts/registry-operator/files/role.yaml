@@ -66,8 +66,8 @@ rules:
 - apiGroups:
   - iam.kaname.in-cloud.io
   resources:
-  - accessbindings
-  - serviceaccounts
+  - iamaccessbindings
+  - iamserviceaccounts
   verbs:
   - create
   - delete

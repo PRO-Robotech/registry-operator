@@ -12,14 +12,14 @@
 | `Registry` | namespace арендатора | заказ: `spec.id` (неизменяем, `^[a-z0-9]{6,20}$`, не начинается с `reg`, равен имени), `spec.templateRef`, `spec.deletionPolicy` (`Retain`/`Purge`), `spec.public` (анонимный pull, по умолчанию `false`) |
 | `RegistryTemplate` | кластер | неизменяемая ревизия шаблона заказа: `claimPolicy.namespaceSelector` (обязателен, непуст), `params`, ссылки на шесть observed-шаблонов |
 | `RegistryIDReservation` | кластер | резерв id (надгробие `Released`, id повторно не выдаётся); закреплённый проект IAM; опись репозиториев, записанных в IAM |
-| `Observed*Template` (`observed.registry.in-cloud.io`) | кластер | Go-шаблоны spec шести видов: `S3BucketClaim`, `VaultClaim`, iam `ServiceAccount`, iam `AccessBinding`, `Addon`, `HTTPRoute`. Контекст закрыт, функции — `toJson`, `toYaml`, `nindent` и встроенные сравнения; `env`, `expandenv`, `getHostByName`, `include`, `define` недоступны (AST-гейт) |
+| `Observed*Template` (`observed.registry.in-cloud.io`) | кластер | Go-шаблоны spec шести видов: `S3BucketClaim`, `VaultClaim`, `IAMServiceAccount`, `IAMAccessBinding`, `Addon`, `HTTPRoute`. Контекст закрыт, функции — `toJson`, `toYaml`, `nindent` и встроенные сравнения; `env`, `expandenv`, `getHostByName`, `include`, `define` недоступны (AST-гейт) |
 
 ## Пайплайн
 
 | стадия | шаги (параллельно) |
 |---|---|
-| 1 | `S3BucketClaim`, `VaultClaim` (гостевой режим vault-operator), iam `ServiceAccount` робота CI, регистрация `registry_registry:<id>` в IAM |
-| 2 | iam `AccessBinding` робота (`registry.pusher` на `registry.registries:<id>`), `Addon` (zot + iam-proxy с путями) |
+| 1 | `S3BucketClaim`, `VaultClaim` (гостевой режим vault-operator), `IAMServiceAccount` робота CI, регистрация `registry_registry:<id>` в IAM |
+| 2 | `IAMAccessBinding` робота (`registry.pusher` на `registry.registries:<id>`), `Addon` (zot + iam-proxy с путями) |
 | 3 | `HTTPRoute` `/v2/<id>/` |
 
 Следующая стадия создаётся только после готовности каждого шага предыдущей; заказ `Ready`

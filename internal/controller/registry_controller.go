@@ -36,7 +36,7 @@ import (
 // +kubebuilder:rbac:groups=registry.in-cloud.io,resources=registryidreservations,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups=registry.in-cloud.io,resources=registryidreservations/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=vault.in-cloud.io,resources=s3bucketclaims;vaultclaims,verbs=get;list;watch;create;patch;delete
-// +kubebuilder:rbac:groups=iam.kaname.in-cloud.io,resources=serviceaccounts;accessbindings,verbs=get;list;watch;create;patch;delete
+// +kubebuilder:rbac:groups=iam.kaname.in-cloud.io,resources=iamserviceaccounts;iamaccessbindings,verbs=get;list;watch;create;patch;delete
 // +kubebuilder:rbac:groups=addons.in-cloud.io,resources=addons,verbs=get;list;watch;create;patch;delete
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,verbs=get;list;watch;create;patch;delete
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch
