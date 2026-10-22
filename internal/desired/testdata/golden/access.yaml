@@ -1,5 +1,5 @@
 apiVersion: iam.kaname.in-cloud.io/v1alpha1
-kind: AccessBinding
+kind: IAMAccessBinding
 metadata:
   name: zot-abc123-ci-pusher
   namespace: cust01
