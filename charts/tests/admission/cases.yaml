@@ -16,7 +16,7 @@ identities:
 objects:
   robot: &robot
     apiVersion: iam.kaname.in-cloud.io/v1alpha1
-    kind: ServiceAccount
+    kind: IAMServiceAccount
     metadata:
       name: zot-abc123-ci
       namespace: cust01
@@ -24,7 +24,7 @@ objects:
     spec: {name: zot-abc123-ci, enabled: true}
   binding: &binding
     apiVersion: iam.kaname.in-cloud.io/v1alpha1
-    kind: AccessBinding
+    kind: IAMAccessBinding
     metadata:
       name: zot-abc123-ci-pusher
       namespace: cust01

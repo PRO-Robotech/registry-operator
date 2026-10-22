@@ -426,11 +426,11 @@ spec:
     resourceRules:
       - apiGroups: ["iam.kaname.in-cloud.io"]
         apiVersions: ["*"]
-        resources: ["serviceaccounts","accessbindings"]
+        resources: ["iamserviceaccounts","iamaccessbindings"]
         operations: ["CREATE","UPDATE","DELETE"]
   matchConditions:
     - name: subject
-      expression: "(request.operation == 'DELETE' ? oldObject : object).metadata.name.startsWith('zot-') || (request.resource.resource == 'accessbindings' \u0026\u0026 ((request.operation == 'DELETE' ? oldObject : object).spec.?roleRef.?name.orValue('').startsWith('registry.') || (request.operation == 'DELETE' ? oldObject : object).spec.?target.?resources.orValue([]).exists(r, r.type.startsWith('registry.'))))"
+      expression: "(request.operation == 'DELETE' ? oldObject : object).metadata.name.startsWith('zot-') || (request.resource.resource == 'iamaccessbindings' \u0026\u0026 ((request.operation == 'DELETE' ? oldObject : object).spec.?roleRef.?name.orValue('').startsWith('registry.') || (request.operation == 'DELETE' ? oldObject : object).spec.?target.?resources.orValue([]).exists(r, r.type.startsWith('registry.'))))"
   variables:
     - name: "isOp"
       expression: "request.userInfo.username == params.data.registryOperator"
@@ -441,7 +441,7 @@ spec:
     - name: "zot"
       expression: "variables.o.metadata.name.startsWith('zot-')"
     - name: "reg"
-      expression: "request.resource.resource == 'accessbindings' \u0026\u0026 ((request.operation == 'DELETE' ? oldObject : object).spec.?roleRef.?name.orValue('').startsWith('registry.') || (request.operation == 'DELETE' ? oldObject : object).spec.?target.?resources.orValue([]).exists(r, r.type.startsWith('registry.')))"
+      expression: "request.resource.resource == 'iamaccessbindings' \u0026\u0026 ((request.operation == 'DELETE' ? oldObject : object).spec.?roleRef.?name.orValue('').startsWith('registry.') || (request.operation == 'DELETE' ? oldObject : object).spec.?target.?resources.orValue([]).exists(r, r.type.startsWith('registry.')))"
     - name: "id"
       expression: "variables.o.metadata.?labels[?'registry.in-cloud.io/id'].orValue('')"
   validations:
@@ -451,10 +451,10 @@ spec:
     - expression: "request.operation == 'DELETE' || !variables.isOp || (variables.id != '' \u0026\u0026 variables.o.metadata.name.startsWith('zot-' + variables.id + '-') \u0026\u0026 variables.o.metadata.?labels[?'registry.in-cloud.io/namespace'].orValue('') == request.namespace)"
       message: "a zot-\u003cid\u003e-* IAM object carries its id and namespace labels"
       reason: Forbidden
-    - expression: "request.resource.resource != 'accessbindings' || request.operation == 'DELETE' || !variables.isOp || (object.spec.roleRef.name in params.data.allowedRoles.split(',') \u0026\u0026 size(object.spec.target.resources) == 1 \u0026\u0026 object.spec.target.resources[0].type == 'registry.registries' \u0026\u0026 object.spec.target.resources[0].id == variables.id \u0026\u0026 object.spec.subjects.all(s, has(s.serviceAccountRef) \u0026\u0026 s.serviceAccountRef.name.startsWith('zot-' + variables.id + '-')))"
+    - expression: "request.resource.resource != 'iamaccessbindings' || request.operation == 'DELETE' || !variables.isOp || (object.spec.roleRef.name in params.data.allowedRoles.split(',') \u0026\u0026 size(object.spec.target.resources) == 1 \u0026\u0026 object.spec.target.resources[0].type == 'registry.registries' \u0026\u0026 object.spec.target.resources[0].id == variables.id \u0026\u0026 object.spec.subjects.all(s, has(s.serviceAccountRef) \u0026\u0026 s.serviceAccountRef.name.startsWith('zot-' + variables.id + '-')))"
       message: "a registry binding grants an allowed role on its own registry to its own robots only"
       reason: Forbidden
-    - expression: "request.resource.resource != 'accessbindings' || request.operation == 'DELETE' || !(variables.zot || variables.reg) || object.spec.subjects.all(s, !has(s.systemClass) \u0026\u0026 s.?user.?id.orValue('') != '*' \u0026\u0026 s.?group.?id.orValue('') != '*' \u0026\u0026 s.?serviceAccountRef.?name.orValue('') != '*')"
+    - expression: "request.resource.resource != 'iamaccessbindings' || request.operation == 'DELETE' || !(variables.zot || variables.reg) || object.spec.subjects.all(s, !has(s.systemClass) \u0026\u0026 s.?user.?id.orValue('') != '*' \u0026\u0026 s.?group.?id.orValue('') != '*' \u0026\u0026 s.?serviceAccountRef.?name.orValue('') != '*')"
       message: "a registry binding names no system class and no wildcard subject, by any writer, under any name and in any namespace: anonymous pull is only the --public flag of iam-proxy"
       reason: Forbidden
 ---

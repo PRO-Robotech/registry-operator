@@ -8,8 +8,8 @@
 
 | этап | что пишет registry-operator | откуда здесь |
 |---|---|---|
-| 1 | `S3BucketClaim`, `VaultClaim`, iam `ServiceAccount` робота, кортеж `registry_registry:<id>` в kaname | личность модуля — манифест модуля kaname; типы — канон модели kaname |
-| 2 | iam `AccessBinding` робота, `Addon` zot | роли — манифест модуля; форма `Addon` — `AddonTemplate`, значения — слои `AddonValue` |
+| 1 | `S3BucketClaim`, `VaultClaim`, iam `IAMServiceAccount` робота, кортеж `registry_registry:<id>` в kaname | личность модуля — манифест модуля kaname; типы — канон модели kaname |
+| 2 | iam `IAMAccessBinding` робота, `Addon` zot | роли — манифест модуля; форма `Addon` — `AddonTemplate`, значения — слои `AddonValue` |
 | 3 | `HTTPRoute /v2/<id>/` | Gateway и общие маршруты `/v2/`, `/iam/token` |
 
 ## Что включено
@@ -130,7 +130,7 @@ ConfigMap `<release>-admission` в `admission.paramsNamespace`, без пара�
 
 | | объект | правило |
 |---|---|---|
-| V1 | `iam.kaname.in-cloud.io` ServiceAccount и AccessBinding с именем `zot-*`; AccessBinding с ролью модуля `registry` (`registry.*`) либо с целью `registry.*` — под любым именем, в любом namespace | объекты `zot-*` пишет только registry-operator; его выдача — роль из `admission.allowedRoles` (только роли манифеста модуля) на `registry.registries:<свой id>` своим роботам; субъект системного класса (`anonymous`, `authenticated`) либо подстановочный (`*`) в выдаче регистри — отказ любому писателю, платформе тоже. Выдача регистри пользователю или группе под своим именем — не предмет V1 |
+| V1 | `iam.kaname.in-cloud.io` IAMServiceAccount и IAMAccessBinding с именем `zot-*`; IAMAccessBinding с ролью модуля `registry` (`registry.*`) либо с целью `registry.*` — под любым именем, в любом namespace | объекты `zot-*` пишет только registry-operator; его выдача — роль из `admission.allowedRoles` (только роли манифеста модуля) на `registry.registries:<свой id>` своим роботам; субъект системного класса (`anonymous`, `authenticated`) либо подстановочный (`*`) в выдаче регистри — отказ любому писателю, платформе тоже. Выдача регистри пользователю или группе под своим именем — не предмет V1 |
 | V2 | `registries/status`, `registryidreservations/status` | только registry-operator — единственный их писатель |
 | V3 | `HTTPRoute` с именем `zot-*` либо со ссылкой на `Service zot-*` | только registry-operator; `/v2/<id>/` на хосте и Gateway регистри к `Service zot-<id>:8080` своего арендатора. Ссылка судится наравне с именем: ReferenceGrant экземпляра открывает `zot-<id>` любому маршруту namespace края |
 | V4 | поды с SA `zot-*` | создаёт только replicaset-controller |

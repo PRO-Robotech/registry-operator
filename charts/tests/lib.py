@@ -365,7 +365,7 @@ def cmd_probe_platform(render, mode):
                     f"shared route {d['metadata']['name']} matches one exact path")
     # Публичность — один механизм, флаг --public iam-proxy: выдач kaname с системными
     # классами anonymous и authenticated платформа не рендерит и не разрешает.
-    p.check("AccessBinding" not in kinds, f"no AccessBinding is rendered, got {kinds.get('AccessBinding')}")
+    p.check("IAMAccessBinding" not in kinds, f"no IAMAccessBinding is rendered, got {kinds.get('IAMAccessBinding')}")
     # Слово systemClass законно лишь в отказе V1 (`!has(s.systemClass)`): вне политик допуска
     # его нет нигде, а в политиках каждое вхождение — отрицание.
     text_rest = yaml.safe_dump_all([d for d in ds if d["kind"] != "ValidatingAdmissionPolicy"])

@@ -12,7 +12,7 @@
 #   Cilium             cilium/cilium v1.19.4
 #   Argo CD            argoproj/argo-cd v3.3.4
 #   vault-operator     PRO-Robotech/vault-operator @b95d6403 (поля гостевого VaultClaim)
-#   kaname-iam-operator PRO-Robotech/kaname-iam-operator @ea747526
+#   kaname-iam-operator PRO-Robotech/kaname-iam-operator @26ee9709
 set -euo pipefail
 dir="${1:?каталог}"; mkdir -p "$dir"
 
@@ -21,7 +21,7 @@ GW=https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.5.1/config/c
 CILIUM=https://raw.githubusercontent.com/cilium/cilium/v1.19.4/pkg/k8s/apis/cilium.io/client/crds/v2
 ARGO=https://raw.githubusercontent.com/argoproj/argo-cd/v3.3.4/manifests/crds
 VAULT=https://raw.githubusercontent.com/PRO-Robotech/vault-operator/b95d64031fbe8038275be5c389136b6479c16e20/config/crd/bases
-IAM=https://raw.githubusercontent.com/PRO-Robotech/kaname-iam-operator/ea747526844bc31bdbf213e6589ce993db830a47/config/crd/bases
+IAM=https://raw.githubusercontent.com/PRO-Robotech/kaname-iam-operator/26ee9709d57ca9ba00ac523695b6b927a3e59db3/config/crd/bases
 
 # имя файла · URL · sha256
 while read -r name url sum; do
@@ -45,7 +45,7 @@ appprojects.yaml   $ARGO/appproject-crd.yaml                              7b9933
 applications.yaml  $ARGO/application-crd.yaml                             ea5e7cf5facd3ed70fe25acb048a495e5f2f893bfc961a02de5cb741b9d630f6
 vaultclaims.yaml   $VAULT/vault.in-cloud.io_vaultclaims.yaml              90be123ccf05dd479088db706100f777bb86a3b5b72343debe99e1cf32f76ab5
 s3bucketclaims.yaml $VAULT/vault.in-cloud.io_s3bucketclaims.yaml          5e1dcd01aaf313f4c1c0c9d24826fc0833ad596729cef6da75946aece525fd8e
-iam-serviceaccounts.yaml $IAM/iam.kaname.in-cloud.io_serviceaccounts.yaml 0c20c57ef97d42dfae819a41d96a7c90b6a5b8f7ce0f5f8dc016d9a1e305704b
-iam-accessbindings.yaml $IAM/iam.kaname.in-cloud.io_accessbindings.yaml   81110ee03a69cfbd9275b126ce6f3f6991b98f9a5f6370f6d1d5fef8feaa8e70
+iam-serviceaccounts.yaml $IAM/iam.kaname.in-cloud.io_iamserviceaccounts.yaml eefe92ee2796d004dc5b6f6f53e0fcb43fa6c211ae752d7072b637b101117425
+iam-accessbindings.yaml $IAM/iam.kaname.in-cloud.io_iamaccessbindings.yaml   e1fba60e7dccda1388449093e0de6061e24ea084e1eafc1f8725991c1d135ba8
 EOF
 echo "crds: $(ls "$dir" | wc -l) files verified"

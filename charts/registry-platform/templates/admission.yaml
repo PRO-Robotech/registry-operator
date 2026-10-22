@@ -64,9 +64,9 @@ data:
 классу или подстановочному субъекту с ролью модуля registry либо на объект registry.* под любым
 именем и в любом namespace дала бы pull приватного регистри мимо флага --public iam-proxy. */}}
 {{- $v1o := "(request.operation == 'DELETE' ? oldObject : object)" }}
-{{- $v1reg := printf "request.resource.resource == 'accessbindings' && (%s.spec.?roleRef.?name.orValue('').startsWith('registry.') || %s.spec.?target.?resources.orValue([]).exists(r, r.type.startsWith('registry.')))" $v1o $v1o }}
+{{- $v1reg := printf "request.resource.resource == 'iamaccessbindings' && (%s.spec.?roleRef.?name.orValue('').startsWith('registry.') || %s.spec.?target.?resources.orValue([]).exists(r, r.type.startsWith('registry.')))" $v1o $v1o }}
 {{- $policies = append $policies (dict "id" "v1" "name" "registry-iam"
-  "rules" (list (dict "apiGroups" (list "iam.kaname.in-cloud.io") "resources" (list "serviceaccounts" "accessbindings") "operations" (list "CREATE" "UPDATE" "DELETE")))
+  "rules" (list (dict "apiGroups" (list "iam.kaname.in-cloud.io") "resources" (list "iamserviceaccounts" "iamaccessbindings") "operations" (list "CREATE" "UPDATE" "DELETE")))
   "match" (printf "%s.metadata.name.startsWith('zot-') || (%s)" $v1o $v1reg)
   "vars" (list
     (dict "name" "o" "expression" $v1o)
@@ -76,8 +76,8 @@ data:
   "checks" (list
     (dict "expression" (printf "!variables.zot || variables.isOp || variables.isPlatform || (request.operation == 'UPDATE' && %s && %s)" (include "rp.same" "spec") (include "rp.same" "metadata.labels")) "message" "zot-* IAM objects are written only by registry-operator; other writers may change only metadata outside labels")
     (dict "expression" "request.operation == 'DELETE' || !variables.isOp || (variables.id != '' && variables.o.metadata.name.startsWith('zot-' + variables.id + '-') && variables.o.metadata.?labels[?'registry.in-cloud.io/namespace'].orValue('') == request.namespace)" "message" "a zot-<id>-* IAM object carries its id and namespace labels")
-    (dict "expression" "request.resource.resource != 'accessbindings' || request.operation == 'DELETE' || !variables.isOp || (object.spec.roleRef.name in params.data.allowedRoles.split(',') && size(object.spec.target.resources) == 1 && object.spec.target.resources[0].type == 'registry.registries' && object.spec.target.resources[0].id == variables.id && object.spec.subjects.all(s, has(s.serviceAccountRef) && s.serviceAccountRef.name.startsWith('zot-' + variables.id + '-')))" "message" "a registry binding grants an allowed role on its own registry to its own robots only")
-    (dict "expression" "request.resource.resource != 'accessbindings' || request.operation == 'DELETE' || !(variables.zot || variables.reg) || object.spec.subjects.all(s, !has(s.systemClass) && s.?user.?id.orValue('') != '*' && s.?group.?id.orValue('') != '*' && s.?serviceAccountRef.?name.orValue('') != '*')" "message" "a registry binding names no system class and no wildcard subject, by any writer, under any name and in any namespace: anonymous pull is only the --public flag of iam-proxy"))) }}
+    (dict "expression" "request.resource.resource != 'iamaccessbindings' || request.operation == 'DELETE' || !variables.isOp || (object.spec.roleRef.name in params.data.allowedRoles.split(',') && size(object.spec.target.resources) == 1 && object.spec.target.resources[0].type == 'registry.registries' && object.spec.target.resources[0].id == variables.id && object.spec.subjects.all(s, has(s.serviceAccountRef) && s.serviceAccountRef.name.startsWith('zot-' + variables.id + '-')))" "message" "a registry binding grants an allowed role on its own registry to its own robots only")
+    (dict "expression" "request.resource.resource != 'iamaccessbindings' || request.operation == 'DELETE' || !(variables.zot || variables.reg) || object.spec.subjects.all(s, !has(s.systemClass) && s.?user.?id.orValue('') != '*' && s.?group.?id.orValue('') != '*' && s.?serviceAccountRef.?name.orValue('') != '*')" "message" "a registry binding names no system class and no wildcard subject, by any writer, under any name and in any namespace: anonymous pull is only the --public flag of iam-proxy"))) }}
 
 {{- /* V2: статус заказа и резерва — только registry-operator, единственный их писатель. */}}
 {{- $policies = append $policies (dict "id" "v2" "name" "registry-status"
