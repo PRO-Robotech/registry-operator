@@ -256,16 +256,17 @@ func (f *Fake) applyRegister(req *iamv1.RegisterResourceRequest) (*iamv1.Registe
 	f.calls = append(f.calls, Call{Method: "Register", Object: req.GetObject(), Chain: slices.Clone(req.GetParentChain())})
 	v := versionOf(req.GetSourceVersion())
 	cur, exists := f.objects[req.GetObject()]
-	if exists && !v.IsZero() && !v.After(cur.Version) {
-		return &iamv1.RegisterResourceResponse{}, nil
+	if !exists || v.IsZero() || v.After(cur.Version) {
+		if len(req.GetParentChain()) == 0 {
+			f.erased = append(f.erased, req.GetObject())
+		}
+		f.objects[req.GetObject()] = Object{
+			Subject: req.GetSubjectId(), Relation: req.GetRelation(), ParentChain: slices.Clone(req.GetParentChain()),
+			ParentProjectID: req.GetParentProjectId(), ParentAccountID: req.GetParentAccountId(), Version: v,
+		}
 	}
-	if len(req.GetParentChain()) == 0 {
-		f.erased = append(f.erased, req.GetObject())
-	}
-	f.objects[req.GetObject()] = Object{
-		Subject: req.GetSubjectId(), Relation: req.GetRelation(), ParentChain: slices.Clone(req.GetParentChain()),
-		ParentProjectID: req.GetParentProjectId(), ParentAccountID: req.GetParentAccountId(), Version: v,
-	}
+	// Ответ теряется и у записи, и у повтора той же версии: вызывающий так
+	// и не узнаёт, дошла ли запись.
 	if f.landed[req.GetObject()] {
 		return nil, status.Error(codes.Unavailable, "deadline exceeded after the write")
 	}
