@@ -220,7 +220,7 @@ injections:
   - name: version-check-open-on-a-private-registry
     file: internal/iamproxy/proxy.go
     old: "if v == allow && id == nil && !p.o.Public {"
-    new: "if false {"
+    new: "if v == allow && id == nil && false {"
     package: ./internal/iamproxy/
     tests: [TestProxy_VersionCheck]
   - name: half-written-pair-replaces-the-working-one
