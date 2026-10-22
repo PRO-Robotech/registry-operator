@@ -137,6 +137,7 @@ spec:
             httpGet:
               path: /readyz
               port: health
+            timeoutSeconds: 3
             periodSeconds: 10
             failureThreshold: 3
           # Живость — только процесс iam-proxy: перезапуск пода из-за S3 или kaname не лечит ни то, ни другое.
