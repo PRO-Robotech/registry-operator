@@ -75,8 +75,14 @@ type Proxy struct {
 	now      func() time.Time
 }
 
-// enrolledTTL — сколько помнится принятая заявка.
-const enrolledTTL = 30 * time.Second
+// enrolledTTL — сколько помнится принятая заявка; maxEnrolledMemo — предел
+// памяти принятых заявок (переполнение сбрасывает её целиком: повтор заявки
+// безвреден); defaultUpstreamTimeout — срок ответа zot по умолчанию.
+const (
+	enrolledTTL            = 30 * time.Second
+	maxEnrolledMemo        = 4096
+	defaultUpstreamTimeout = 10 * time.Minute
+)
 
 // New — прокси; конфигурация проверяется целиком.
 func New(o Options) (*Proxy, error) {
@@ -94,7 +100,7 @@ func New(o Options) (*Proxy, error) {
 		o.Log = slog.Default()
 	}
 	if o.UpstreamTimeout <= 0 {
-		o.UpstreamTimeout = 10 * time.Minute
+		o.UpstreamTimeout = defaultUpstreamTimeout
 	}
 	p := &Proxy{o: o, enrolled: map[string]time.Time{}, now: time.Now}
 	p.rp = &httputil.ReverseProxy{
@@ -143,7 +149,7 @@ func maskUpstream(resp *http.Response) error {
 	resp.Status = strconv.Itoa(status) + " " + http.StatusText(status)
 	resp.Body = io.NopCloser(bytes.NewReader(b))
 	resp.ContentLength = int64(len(b))
-	resp.Header = http.Header{"Content-Type": {"application/json"}, "Content-Length": {strconv.Itoa(len(b))}}
+	resp.Header = http.Header{"Content-Type": {"application/json"}, "Content-Length": {strconv.Itoa(len(b))}, apiVersionHeader: {apiVersion}}
 	return nil
 }
 
@@ -157,9 +163,41 @@ func writeError(w http.ResponseWriter, status int, code, msg, challenge string) 
 		w.Header().Set("WWW-Authenticate", challenge)
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Docker-Distribution-Api-Version", "registry/2.0")
+	w.Header().Set(apiVersionHeader, apiVersion)
 	w.WriteHeader(status)
 	_, _ = w.Write(errorBody(code, msg))
+}
+
+// Версия протокола Distribution в заголовке каждого ответа прокси.
+const (
+	apiVersionHeader = "Docker-Distribution-Api-Version"
+	apiVersion       = "registry/2.0"
+)
+
+// versionCheck — проверка версии протокола (GET и HEAD /v2/): отвечает сам
+// прокси, zot её не видит. Анониму частного регистри и негодному токену —
+// 401 с вызовом за токеном без области: клиент проверяет учётные данные
+// при входе, а не на первом запросе к репозиторию.
+func (p *Proxy) versionCheck(w http.ResponseWriter, r *http.Request) {
+	id, v := p.identity(r)
+	if v == allow && id == nil && !p.o.Public {
+		v = unauthenticated
+	}
+	if p.o.Decisions != nil {
+		p.o.Decisions("version", v.String())
+	}
+	switch v {
+	case allow:
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set(apiVersionHeader, apiVersion)
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "{}")
+	case unavailable:
+		writeError(w, http.StatusServiceUnavailable, "UNAVAILABLE", "authorization is unavailable, retry later", "")
+	default:
+		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "authentication required",
+			fmt.Sprintf(`Bearer realm=%q,service=%q`, p.o.Realm, p.o.Service))
+	}
 }
 
 // verdict — исход решения.
@@ -184,6 +222,10 @@ func (v verdict) String() string {
 
 // ServeHTTP — решение и проксирование.
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/v2/" && r.URL.RawPath == "" && (r.Method == http.MethodGet || r.Method == http.MethodHead) {
+		p.versionCheck(w, r)
+		return
+	}
 	rt := Parse(p.o.RegistryID, r)
 	if rt.Action == ActionNone {
 		p.count(rt, "not-found")
@@ -323,7 +365,7 @@ func (p *Proxy) create(ctx context.Context, id Identity, repository string) verd
 	switch {
 	case err == nil:
 		p.mu.Lock()
-		if len(p.enrolled) >= 4096 {
+		if len(p.enrolled) >= maxEnrolledMemo {
 			p.enrolled = map[string]time.Time{}
 		}
 		p.enrolled[key] = p.now()

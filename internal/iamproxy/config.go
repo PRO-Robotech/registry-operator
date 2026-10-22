@@ -5,17 +5,16 @@ package iamproxy
 
 import (
 	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"flag"
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/PRO-Robotech/registry-operator/internal/kaname"
+	"github.com/PRO-Robotech/registry-operator/internal/tlsfile"
 )
 
 // Config — запуск прокси. Неполная или небезопасная конфигурация — отказ
@@ -134,7 +133,7 @@ func (c *Config) Types() []string {
 
 // TLSClient — HTTP-клиент, доверяющий только объявленному центру.
 func TLSClient(caFile string, timeout time.Duration) (*http.Client, error) {
-	pool, err := CAPool(caFile)
+	pool, err := tlsfile.CAPool(caFile)
 	if err != nil {
 		return nil, err
 	}
@@ -146,17 +145,4 @@ func TLSClient(caFile string, timeout time.Duration) (*http.Client, error) {
 			IdleConnTimeout:     90 * time.Second,
 		},
 	}, nil
-}
-
-// CAPool — пул из файла центров.
-func CAPool(caFile string) (*x509.CertPool, error) {
-	b, err := os.ReadFile(caFile) //nolint:gosec // путь — флаг запуска.
-	if err != nil {
-		return nil, fmt.Errorf("read CA %s: %w", caFile, err)
-	}
-	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM(b) {
-		return nil, fmt.Errorf("CA file %s holds no certificate", caFile)
-	}
-	return pool, nil
 }

@@ -61,18 +61,32 @@ type TokenConfig struct {
 	// внеочередное обновление по неизвестному kid.
 	KeysTTL      time.Duration
 	RefreshEvery time.Duration
+	// FetchTimeout — срок одного обращения за набором ключей (0 — 10 с).
+	FetchTimeout time.Duration
 	Leeway       time.Duration
 	Now          func() time.Time
 }
 
-// Verifier — проверка токенов клиентов.
+// Отступ обновления набора ключей после неудачи: удвоение от RefreshEvery
+// до потолка.
+const maxKeysBackoff = 5 * time.Minute
+
+// Verifier — проверка токенов клиентов. Набор ключей обновляется одним
+// обращением на всех и вне мьютекса: запрос с ключом из прежнего снимка
+// обновления не ждёт, запрос с неизвестным ключом ждёт его в пределах своего
+// срока; после неудачи следующее обновление — не раньше отступа.
 type Verifier struct {
 	cfg TokenConfig
 
 	mu        sync.Mutex
 	keys      map[string]*ecdsa.PublicKey
 	fetchedAt time.Time
-	forcedAt  time.Time
+	// nextAt — не раньше этого — следующее обращение к издателю.
+	nextAt   time.Time
+	failures int
+	lastErr  error
+	// inflight — идущее обновление; закрывается по его исходу.
+	inflight chan struct{}
 }
 
 // NewVerifier — проверка с объявленной конфигурацией; набор ключей только
@@ -87,6 +101,9 @@ func NewVerifier(cfg TokenConfig) (*Verifier, error) {
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
+	}
+	if cfg.FetchTimeout <= 0 {
+		cfg.FetchTimeout = 10 * time.Second
 	}
 	return &Verifier{cfg: cfg}, nil
 }
@@ -152,65 +169,123 @@ func subjectOf(c jwt.MapClaims) (string, bool) {
 }
 
 // Ready — набор ключей издателя получен хотя бы раз; пока нет — попытка
-// получить его (не чаще RefreshEvery). Прокси без ключей не проверит ни
-// одного токена, и под не должен принимать трафик.
+// получить его (не раньше отступа). Прокси без ключей не проверит ни одного
+// токена, и под не должен принимать трафик.
 func (v *Verifier) Ready(ctx context.Context) bool {
 	v.mu.Lock()
-	defer v.mu.Unlock()
 	if v.keys != nil {
+		v.mu.Unlock()
 		return true
 	}
-	now := v.cfg.Now()
-	if now.Sub(v.forcedAt) < v.cfg.RefreshEvery {
+	if v.cfg.Now().Before(v.nextAt) {
+		v.mu.Unlock()
 		return false
 	}
-	v.forcedAt = now
-	keys, err := v.fetch(ctx)
-	if err != nil {
+	wait := v.refreshLocked(ctx)
+	v.mu.Unlock()
+	select {
+	case <-wait:
+	case <-ctx.Done():
 		return false
 	}
-	v.keys, v.fetchedAt = keys, now
-	return true
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.keys != nil
 }
 
 // errKeyNotPublished — набор ключей получен, но такого kid в нём нет:
 // порок токена, а не недоступность издателя.
 var errKeyNotPublished = errors.New("key is not published by the issuer")
 
-// key — открытый ключ по kid: из снимка, при неизвестном kid — внеочередное
-// обновление не чаще RefreshEvery (ротация ключей издателя).
+// key — открытый ключ по kid. Снимок свеж и ключ в нём — сразу. Иначе —
+// обновление (протухший снимок либо неизвестный kid), если отступ истёк:
+// ключ из прежнего снимка отдаётся, не дожидаясь обновления (оно идёт в
+// стороне), неизвестный kid ждёт исхода обновления. После обновления —
+// решение по тому, что есть, без второго обращения.
 func (v *Verifier) key(ctx context.Context, kid string) (*ecdsa.PublicKey, error) {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	now := v.cfg.Now()
-	stale := v.keys == nil || now.Sub(v.fetchedAt) >= v.cfg.KeysTTL
-	if !stale {
-		if k, ok := v.keys[kid]; ok {
+	for refreshed := false; ; refreshed = true {
+		v.mu.Lock()
+		now := v.cfg.Now()
+		stale := v.keys == nil || now.Sub(v.fetchedAt) >= v.cfg.KeysTTL
+		k, known := v.keys[kid]
+		if known && !stale {
+			v.mu.Unlock()
 			return k, nil
 		}
-		if now.Sub(v.forcedAt) < v.cfg.RefreshEvery {
-			return nil, fmt.Errorf("%w: %q", errKeyNotPublished, kid)
+		if refreshed || now.Before(v.nextAt) {
+			err := v.verdictLocked(kid, stale, known)
+			v.mu.Unlock()
+			return k, err
 		}
-		v.forcedAt = now
-	}
-	keys, err := v.fetch(ctx)
-	if err != nil {
-		if v.keys != nil {
-			// Издатель не ответил на обновление: действует прежний снимок.
-			if k, ok := v.keys[kid]; ok {
-				return k, nil
-			}
-			if !stale {
-				return nil, fmt.Errorf("%w: %q", errKeyNotPublished, kid)
-			}
+		wait := v.refreshLocked(ctx)
+		v.mu.Unlock()
+		if known {
+			// Издатель обновляется в стороне; прежний снимок действует.
+			return k, nil
 		}
-		return nil, err
+		select {
+		case <-wait:
+		case <-ctx.Done():
+			return nil, fmt.Errorf("waiting for the key set: %w", ctx.Err())
+		}
 	}
-	v.keys, v.fetchedAt = keys, now
-	if k, ok := keys[kid]; ok {
-		return k, nil
+}
+
+// verdictLocked — решение без нового обращения к издателю.
+func (v *Verifier) verdictLocked(kid string, stale, known bool) error {
+	switch {
+	case known:
+		// Издатель не ответил на обновление: действует прежний снимок.
+		return nil
+	case v.keys != nil && !stale:
+		return fmt.Errorf("%w: %q", errKeyNotPublished, kid)
+	case v.lastErr != nil:
+		return v.lastErr
+	case v.keys != nil:
+		return fmt.Errorf("%w: %q", errKeyNotPublished, kid)
 	}
-	return nil, fmt.Errorf("%w: %q", errKeyNotPublished, kid)
+	return errors.New("key set is not fetched yet")
+}
+
+// refreshLocked — канал исхода обновления; обновления нет — запускает его.
+// Обращение идёт вне мьютекса, в контексте без отмены запроса (запрос,
+// ушедший раньше, не обрывает обновление для остальных) со своим сроком.
+func (v *Verifier) refreshLocked(ctx context.Context) <-chan struct{} {
+	if v.inflight != nil {
+		return v.inflight
+	}
+	done := make(chan struct{})
+	v.inflight = done
+	fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), v.cfg.FetchTimeout)
+	go func() {
+		defer cancel()
+		keys, err := v.fetch(fctx)
+		v.mu.Lock()
+		defer v.mu.Unlock()
+		now := v.cfg.Now()
+		if err != nil {
+			v.failures++
+			v.lastErr = err
+			v.nextAt = now.Add(backoff(v.cfg.RefreshEvery, v.failures))
+		} else {
+			v.keys, v.fetchedAt = keys, now
+			v.failures, v.lastErr = 0, nil
+			v.nextAt = now.Add(v.cfg.RefreshEvery)
+		}
+		v.inflight = nil
+		close(done)
+	}()
+	return done
+}
+
+// backoff — отступ после n неудач подряд: base, 2·base, 4·base… до
+// maxKeysBackoff.
+func backoff(base time.Duration, n int) time.Duration {
+	d := max(base, time.Second)
+	for i := 1; i < n && d < maxKeysBackoff; i++ {
+		d *= 2
+	}
+	return min(d, maxKeysBackoff)
 }
 
 type jwk struct {
