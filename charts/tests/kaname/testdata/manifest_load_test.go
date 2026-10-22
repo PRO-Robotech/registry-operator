@@ -32,12 +32,15 @@
 //
 // # Близнецы — каждый меняет РОВНО ОДИН факт
 //
-//	доставка как есть                         → все стадии без находок
+//	доставка как есть                         → все стадии без находок; выдачу на
+//	                                            один репозиторий покрывают puller и pusher
 //	+ неизвестный раздел верхнего уровня      → отказ чтения доставки
 //	+ класс create у вложенного правила puller → находка суда ролей о repositories
+//	− верхнее правило puller на репозитории    → тип registry.repositories ролью не покрыт
 //
 // Первый близнец держит, что чтение доставки судит именно этот файл; второй —
-// что суд ролей читает его правила, а не молчит над пустым перечнем.
+// что суд ролей читает его правила, а не молчит над пустым перечнем; третий —
+// что покрытие типа цели даёт именно верхнее правило, а не вложенное.
 package registryoperatorprobe_test
 
 import (
@@ -53,6 +56,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
 	"github.com/PRO-Robotech/kaname/internal/authzmodel"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 	"github.com/PRO-Robotech/kaname/internal/manifest/roleexport"
 	"github.com/PRO-Robotech/kaname/internal/modelcompose"
@@ -64,6 +68,16 @@ const deliveryKey = "registry.manifest.yaml"
 
 // wantRoles — роли, которые объявляет модуль; выдаёт их registry-operator.
 var wantRoles = []string{"registry.admin", "registry.puller", "registry.pusher"}
+
+// repoTarget — тип цели выдачи на один репозиторий: его kaname сверяет с
+// правилами верхнего уровня роли (ворота 3 создания выдачи, Rules.CoversType).
+const repoTarget = "registry.repositories"
+
+// regTarget — тип цели выдачи на регистри.
+const regTarget = "registry.registries"
+
+// onRepository — роли, которые выдаются точечно на репозиторий.
+var onRepository = map[string]bool{"registry.puller": true, "registry.pusher": true, "registry.admin": false}
 
 // delivered — текст доставки из рендера чарта.
 func delivered(t *testing.T) string {
@@ -190,10 +204,12 @@ func TestDeliveredRegistryManifestPassesEveryKanameStage(t *testing.T) {
 	if !rep.RulesJudged || !rep.NamedJudged {
 		t.Fatalf("стадии суда ролей не исполнялись: правила %v, поимённая форма %v", rep.RulesJudged, rep.NamedJudged)
 	}
-	// Три роли по два правила (верхнее и вложенное); пар (ресурс, класс):
-	// на регистри 1 + 2 + 4, на репозиториях 2 + 3 + 4.
-	if rep.Rules.RolesRead != 3 || rep.Rules.RulesRead != 6 || rep.Rules.PairsJudged != 16 {
-		t.Fatalf("суд ролей осмотрел ролей %d, правил %d, пар %d; ожидалось 3, 6, 16",
+	// Три роли: у каждой верхнее правило на регистри и вложенное на его
+	// репозитории, у puller и pusher — ещё верхнее на один репозиторий; правил
+	// 3 + 3 + 2 = 8. Пар (ресурс, класс): на регистри 1 + 2 + 4, вложенных на
+	// репозиториях 2 + 3 + 4, верхних на репозитории 2 + 3 — всего 21.
+	if rep.Rules.RolesRead != 3 || rep.Rules.RulesRead != 8 || rep.Rules.PairsJudged != 21 {
+		t.Fatalf("суд ролей осмотрел ролей %d, правил %d, пар %d; ожидалось 3, 8, 21",
 			rep.Rules.RolesRead, rep.Rules.RulesRead, rep.Rules.PairsJudged)
 	}
 
@@ -204,6 +220,15 @@ func TestDeliveredRegistryManifestPassesEveryKanameStage(t *testing.T) {
 	for _, id := range wantRoles {
 		if len(rules[id]) == 0 {
 			t.Errorf("роль %s не дала ни одного правила прав", id)
+		}
+		// Покрытие типа цели — тот же предикат, которым kaname судит создание
+		// выдачи; отказ на нём — «role … does not grant verbs on registry.repositories».
+		got := domain.Rules(rules[id])
+		if !got.CoversType(regTarget) {
+			t.Errorf("роль %s не покрывает тип %s: выдачу на регистри kaname отвергнет", id, regTarget)
+		}
+		if got.CoversType(repoTarget) != onRepository[id] {
+			t.Errorf("роль %s: покрытие типа %s %v, ожидалось %v", id, repoTarget, got.CoversType(repoTarget), onRepository[id])
 		}
 	}
 }
@@ -226,7 +251,7 @@ func TestDeliveryWithAnUnknownSectionIsRefused(t *testing.T) {
 // create на репозиториях, которого у типа registry_repository нет; суд ролей
 // называет находку о repositories.
 func TestPullerWithCreateOnRepositoriesIsRefused(t *testing.T) {
-	doc := twin(t, delivered(t), "classes: [get, list]\n", "classes: [get, list, create]\n")
+	doc := twin(t, delivered(t), "\n            classes: [get, list]\n", "\n            classes: [get, list, create]\n")
 	m := load(t, doc)
 	rep := roleexport.Check(catalogfixture.Facts(), m, mustActions(t))
 	t.Logf("суд ролей: %s", rep.Summary())
@@ -239,5 +264,25 @@ func TestPullerWithCreateOnRepositoriesIsRefused(t *testing.T) {
 	}
 	if !hit {
 		t.Fatalf("находки о create на repositories у registry.puller нет: %v", rep.Faults)
+	}
+}
+
+// TestPullerWithoutItsRepositoryRuleDoesNotCoverTheRepositoryTarget — близнец:
+// доставка без верхнего правила puller на репозитории. Вложенное правило на
+// регистри остаётся, но тип registry.repositories роль puller уже не покрывает,
+// а pusher — по-прежнему: покрытие даёт именно верхнее правило.
+func TestPullerWithoutItsRepositoryRuleDoesNotCoverTheRepositoryTarget(t *testing.T) {
+	doc := twin(t, delivered(t),
+		"\n      - module: registry\n        resources: [repositories]\n        classes: [get, list]\n", "\n")
+	m := load(t, doc)
+	rules, faults, _ := roleexport.ExportRoleRules(catalogfixture.Facts(), m, mustActions(t))
+	if len(faults) != 0 {
+		t.Fatalf("экспорт прав нашёл %d: %v", len(faults), faults)
+	}
+	if domain.Rules(rules["registry.puller"]).CoversType(repoTarget) {
+		t.Fatalf("puller без верхнего правила на репозитории покрывает %s: проба не судит верхнее правило", repoTarget)
+	}
+	if !domain.Rules(rules["registry.pusher"]).CoversType(repoTarget) {
+		t.Fatalf("pusher перестал покрывать %s: близнец изменил больше одного факта", repoTarget)
 	}
 }

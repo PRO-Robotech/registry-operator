@@ -198,8 +198,7 @@ def cmd_probe_instance(render, site_file, vars_file, probes_on):
             "--jwks-ca": ca,
             "--issuer": site["kaname"]["issuer"],
             "--audience": site["kaname"]["audience"],
-            "--kaname-address": site["kaname"].get("address"),
-            "--kaname-server-name": site["kaname"].get("serverName"),
+            "--kaname-url": site["kaname"].get("url"),
             "--kaname-ca": ca,
             "--check-timeout": site["iamProxy"].get("checkTimeout"),
             "--cache-ttl": site["iamProxy"]["decisionCacheTTL"],
@@ -207,8 +206,6 @@ def cmd_probe_instance(render, site_file, vars_file, probes_on):
             "--enroll-ca": ca,
             "--enroll-token-file": "/var/run/secrets/registry-operator/token",
             "--enroll-timeout": site["iamProxy"].get("enrollTimeout"),
-            "--realm": site["iamProxy"].get("realm"),
-            "--service": site["iamProxy"].get("service"),
         }
         for k, val in want.items():
             p.check(val is not None and got.get(k) == val, f"iam-proxy {k}={val}, got {got.get(k)}")
@@ -331,7 +328,7 @@ def cmd_probe_instance(render, site_file, vars_file, probes_on):
         p.check("9091" not in all_ports, f"no egress to the kaname internal listener, got {sorted(all_ports)}")
         dns_names = {r.get("matchName") for r in dns["toPorts"][0]["rules"]["dns"] if "matchName" in r}
         hosts = {s3host} | {re.sub(r"^https://([^/:]+).*$", r"\1", u) for u in (
-            site["vault"]["address"], "https://" + str(site["kaname"].get("address")), site["kaname"]["jwksURL"], site["registryOperator"]["registrationURL"])}
+            site["vault"]["address"], str(site["kaname"].get("url")), site["kaname"]["jwksURL"], site["registryOperator"]["registrationURL"])}
         p.check(hosts <= dns_names, f"S3, Vault, kaname and registry-operator hosts resolvable, missing {sorted(hosts - dns_names)}")
     return p.done()
 
@@ -400,16 +397,23 @@ def cmd_probe_platform(render, mode):
         # Класс create на регистри kaname ролью модуля не выдаёт (ни одно действие каталога
         # прав его не спрашивает, суд ролей @93ad1b88 отказывает): заведение репозитория в
         # регистри iam-proxy судит глаголом v_update на регистри.
-        want = {"registry.puller": (["get"], ["get", "list"]),
-                "registry.pusher": (["get", "update"], ["get", "list", "update"]),
-                "registry.admin": (["get", "list", "update", "delete"], ["get", "list", "update", "delete"])}
-        for rid, (reg, repo) in want.items():
+        # Выдачу на один репозиторий (цель registry.repositories:<id>/<repo>) kaname
+        # принимает, только если тип цели покрыт правилом ВЕРХНЕГО уровня роли (ворота 3,
+        # CoversType): вложенное правило его не покрывает. Поэтому у puller и pusher —
+        # второе правило верхнего уровня на репозитории с теми же классами, что у вложенного;
+        # admin точечно на репозиторий не выдаётся.
+        want = {"registry.puller": (["get"], ["get", "list"], True),
+                "registry.pusher": (["get", "update"], ["get", "list", "update"], True),
+                "registry.admin": (["get", "list", "update", "delete"], ["get", "list", "update", "delete"], False)}
+        for rid, (reg, repo, on_repo) in want.items():
             role = roles.get(rid, {})
             rules = role.get("rules", [])
-            ok = (len(rules) == 1 and rules[0].get("module") == "registry" and rules[0].get("resources") == ["registries"]
-                  and rules[0].get("classes") == reg
-                  and rules[0].get("children") == [{"resources": ["repositories"], "classes": repo}])
-            p.check(ok, f"{rid}: {reg} on the registry and {repo} on each of its repositories through children")
+            top = {"module": "registry", "resources": ["registries"], "classes": reg,
+                   "children": [{"resources": ["repositories"], "classes": repo}]}
+            expect = [top] + ([{"module": "registry", "resources": ["repositories"], "classes": repo}] if on_repo else [])
+            p.check(rules == expect,
+                    f"{rid}: {reg} on the registry and {repo} on each of its repositories through children"
+                    + (f", and {repo} on one repository named by the grant" if on_repo else "") + f", got {rules}")
             p.check(role.get("tier") == {"tierType": "iam.cluster", "tierId": "cluster_root"} and bool(role.get("description")),
                     f"{rid}: cluster tier, described")
         seed = m.get("seed", {})

@@ -77,8 +77,7 @@ Argo CD.
 | `--jwks-ca=<путь>` | CA площадки, под которым отдаётся набор ключей |
 | `--issuer=<iss>` | `iss` принимаемых токенов |
 | `--audience=<aud>` | `aud` принимаемых токенов |
-| `--kaname-address=<host:port>` | публичный gRPC kaname (`AuthorizeService.Check`); `:9091` схема отвергает |
-| `--kaname-server-name=<имя>` | имя в сертификате публичного gRPC kaname |
+| `--kaname-url=<https://host[:port]>` | публичный REST-фронт kaname (`AuthorizeService.Check`, `POST /iam/v1/authorize:check`), без пути; `:9091` схема отвергает |
 | `--kaname-ca=<путь>` | CA площадки для kaname |
 | `--check-timeout=<1s…30s>` | дедлайн одного Check |
 | `--cache-ttl=<1s…10s>` | окно кэша вердиктов |
@@ -86,8 +85,6 @@ Argo CD.
 | `--enroll-ca=<путь>` | CA площадки для эндпоинта регистрации |
 | `--enroll-token-file=/var/run/secrets/registry-operator/token` | projected-токен SA `zot-<id>` для эндпоинта регистрации |
 | `--enroll-timeout=<1s…60s>` | дедлайн одной заявки |
-| `--realm=<https://…>` | `realm` в `WWW-Authenticate`: выдача токена края `/iam/token` |
-| `--service=<имя>` | `service` в `WWW-Authenticate` |
 
 ### Пробы пода
 

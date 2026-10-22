@@ -1,0 +1,6 @@
+# Близнец: базовая площадка. Меняется один факт: адрес Check kaname с путём — iam-proxy
+# принимает только https://host[:port] и сам дописывает путь Check.
+# expect: at '/site/kaname/url'
+site:
+  kaname:
+    url: https://kaname.example.test:8443/iam/v1

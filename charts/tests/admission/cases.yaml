@@ -201,6 +201,20 @@ cases:
   - {name: v1-operator-binds-anonymous, policy: v1-registry-iam, as: operator, verb: create, expect: deny, object: *binding, set: {spec.subjects: [{systemClass: {name: anonymous}}]}}
   - {name: v1-operator-binds-authenticated, policy: v1-registry-iam, as: operator, verb: create, expect: deny, object: *binding, set: {spec.subjects: [{systemClass: {name: authenticated}}]}}
   - {name: v1-operator-binds-public-read-role, policy: v1-registry-iam, as: operator, verb: create, expect: deny, object: *binding, set: {spec.roleRef.name: registry.public.read}}
+  # Выдача судится по СОДЕРЖИМОМУ, а не по имени zot-* и не только в namespace арендатора:
+  # выдача системному классу роли модуля registry либо на объект registry.* под любым
+  # именем и в любом namespace дала бы pull приватного регистри мимо --public.
+  - {name: v1-operator-binds-authenticated-under-another-name, policy: v1-registry-iam, as: operator, verb: create, expect: deny, object: *binding, rename: pull-all, set: {spec.subjects: [{systemClass: {name: authenticated}}]}}
+  - {name: v1-operator-binds-authenticated-outside-tenant, policy: v1-registry-iam, as: operator, verb: create, expect: deny, object: *binding, set: {metadata.namespace: cust02, spec.subjects: [{systemClass: {name: authenticated}}]}}
+  - {name: v1-stranger-binds-authenticated-under-another-name, policy: v1-registry-iam, as: stranger, verb: create, expect: deny, object: *binding, rename: pull-all, set: {spec.subjects: [{systemClass: {name: authenticated}}]}}
+  - {name: v1-stranger-binds-authenticated-outside-tenant, policy: v1-registry-iam, as: stranger, verb: create, expect: deny, object: *binding, rename: pull-all, set: {metadata.namespace: cust02, spec.subjects: [{systemClass: {name: authenticated}}]}}
+  - {name: v1-stranger-binds-anonymous-on-the-role-only, policy: v1-registry-iam, as: stranger, verb: create, expect: deny, object: *binding, rename: pull-all, set: {metadata.namespace: cust02, spec.subjects: [{systemClass: {name: anonymous}}], spec.target.resources: [{type: iam.project, id: prj01}]}}
+  - {name: v1-stranger-binds-wildcard-user, policy: v1-registry-iam, as: stranger, verb: create, expect: deny, object: *binding, rename: pull-team, set: {spec.subjects: [{user: {id: "*"}}]}}
+  - {name: v1-platform-binds-authenticated, policy: v1-registry-iam, as: platform, verb: create, expect: deny, object: *binding, rename: pull-all, set: {spec.subjects: [{systemClass: {name: authenticated}}]}}
+  # Законные близнецы: тот же объект, меняется один факт.
+  - {name: v1-stranger-binds-user-under-another-name, policy: v1-registry-iam, as: stranger, verb: create, expect: allow, object: *binding, rename: pull-team, set: {spec.subjects: [{user: {id: usr01}}]}}
+  - {name: v1-platform-binds-robot-under-another-name, policy: v1-registry-iam, as: platform, verb: create, expect: allow, object: *binding, rename: pull-all}
+  - {name: v1-stranger-binds-authenticated-to-another-module, policy: v1-registry-iam, as: stranger, verb: create, expect: allow, object: *binding, rename: pull-all, set: {metadata.namespace: cust02, spec.subjects: [{systemClass: {name: authenticated}}], spec.roleRef.name: vpc.viewer, spec.target.resources: [{type: vpc.networks, id: net01}]}}
   # V3 — маршрут заказа.
   - {name: v3-stranger-creates-route, policy: v3-registry-route, as: stranger, verb: create, expect: deny, object: *route}
   - {name: v3-operator-routes-foreign-path, policy: v3-registry-route, as: operator, verb: create, expect: deny, object: *route, set: {spec.rules: [{matches: [{path: {type: PathPrefix, value: /v2/xyz789/}}], backendRefs: [{group: "", kind: Service, name: zot-abc123, namespace: cust01, port: 8080}]}]}}
