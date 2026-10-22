@@ -96,6 +96,17 @@ jobs:
           if python3 hack/check-netpol.py no-policy.yaml; then echo "check-netpol is blind to a missing policy"; exit 1; fi
           yq '(select(.kind == "NetworkPolicy") | .spec.ingress[] | select(.ports[].port == "enrollment") | .from) = [{"namespaceSelector": {}}]' rendered.yaml > open.yaml
           if python3 hack/check-netpol.py open.yaml; then echo "check-netpol is blind to an open source"; exit 1; fi
+      - name: the values prefix reaches exactly the order layers of registry-platform
+        run: |
+          python3 hack/check-values-layers.py rendered.yaml charts/tests/golden/platform-*.yaml
+          # Инъекции: префикс края платформы и префикс, захватывающий край, — находка (код 1),
+          # а не «не выполнилось» (код 2); законный близнец — проверка выше.
+          for bad in registry-platform registry-; do
+            helm template t charts/registry-operator -n registry-system -f charts/registry-operator/ci/test-values.yaml \
+              --set config.policy.addon.valuesAddonPrefix="$bad" > "inj-$bad.yaml"
+            set +e; python3 hack/check-values-layers.py "inj-$bad.yaml" charts/tests/golden/platform-*.yaml; code=$?; set -e
+            [ "$code" -eq 1 ] || { echo "check-values-layers is blind to valuesAddonPrefix=$bad (code $code, want 1)"; exit 1; }
+          done
       - name: refusals have their reason
         run: |
           set +e
