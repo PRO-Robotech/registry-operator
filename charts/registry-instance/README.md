@@ -2,8 +2,8 @@
 
 zot одного регистри по заказу и его прокси прав `iam-proxy`. Чарт отвечает ровно на вопрос
 «поставить zot с нужными путями»: всё, у чего есть своё состояние, — бакет (`S3BucketClaim`),
-роль Vault (`VaultClaim`), робот и выдача kaname (`iam.kaname.in-cloud.io` `ServiceAccount`,
-`AccessBinding`), кортеж ресурса `registry_registry:<id>`, маршрут края (`HTTPRoute`), —
+роль Vault (`VaultClaim`), робот и выдача kaname (`iam.kaname.in-cloud.io` `IAMServiceAccount`,
+`IAMAccessBinding`), кортеж ресурса `registry_registry:<id>`, маршрут края (`HTTPRoute`), —
 заводит и ведёт registry-operator сам. Сюда он передаёт только пути к ним.
 
 Ставится через `Addon` (addons-operator → Argo CD). Объекты платформы, без которых `Addon`
@@ -164,8 +164,8 @@ update, delete), затем заявка на регистрацию. `Authoriza
 арендатора, аудитории токенов Vault и registry-operator различны; иначе рендер отказывает.
 
 `Addon` заказа оператор ставит на этапе 2 пайплайна: после готовности `S3BucketClaim` и
-`VaultClaim` (лист с ключами записан, роль заведена), iam `ServiceAccount` робота и кортежа
-`registry_registry:<id>`; параллельно — `AccessBinding` робота. Готовность zot оператор
+`VaultClaim` (лист с ключами записан, роль заведена), iam `IAMServiceAccount` робота и кортежа
+`registry_registry:<id>`; параллельно — `IAMAccessBinding` робота. Готовность zot оператор
 читает сам: `Deployment zot-<id>` в namespace `<login>` сошёлся на текущей ревизии
 (`observedGeneration == generation`, `updatedReplicas == availableReplicas == 1`) и
 `Application` синхронизирован на текущих переменных и `syncEpoch` — иначе «Available» говорит о
