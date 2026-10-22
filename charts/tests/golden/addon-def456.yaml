@@ -1,0 +1,52 @@
+apiVersion: addons.in-cloud.io/v1alpha1
+kind: Addon
+metadata:
+  name: reg-def456
+spec:
+  backend:
+    finalizer: true
+    namespace: argocd
+    project: registry
+    syncPolicy:
+      automated:
+        prune: true
+        selfHeal: true
+      retry:
+        backoff:
+          duration: 10s
+          factor: 2
+          maxDuration: 3m
+        limit: 5
+      syncOptions:
+      - ServerSideApply=true
+      - FailOnSharedResource=true
+    type: argocd
+  chart: registry-instance
+  releaseName: zot-def456
+  repoURL: oci://ghcr.io/pro-robotech/charts/registry-instance
+  targetCluster: in-cluster
+  targetNamespace: cust02
+  valuesSelectors:
+  - matchLabels:
+      addons.in-cloud.io/addon: registry-instance
+      addons.in-cloud.io/values: order
+    name: order
+    priority: 0
+  - matchLabels:
+      addons.in-cloud.io/addon: registry-instance
+      addons.in-cloud.io/values: site
+    name: site
+    priority: 10
+  variables:
+    bucket: cust02-zot-def456
+    endpoint: https://storage.example.test:9443
+    id: def456
+    login: cust02
+    public: 'true'
+    region: ru-1
+    registryUID: 0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d
+    syncEpoch: '3'
+    vaultAuthMount: kubernetes-tenants
+    vaultRole: zot-def456
+    vaultSecretPath: secret/data/clusters/example/namespaces/cust02/apps/docker-registry/zot-def456
+  version: 1.0.0
