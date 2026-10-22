@@ -7,6 +7,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -115,5 +117,30 @@ func TestConfig_RefusesAnIncompleteOrUnsafeConfiguration(t *testing.T) {
 				t.Fatalf("want a refusal naming %q, got %v", c.want, err)
 			}
 		})
+	}
+}
+
+// Интерфейс флагов, на который опирается чарт registry-instance (его
+// README): каждый флаг рендера чарта разбирается, и собранная из них
+// конфигурация проходит проверку старта.
+func TestConfig_TheFlagsOfTheInstanceChartAreUnderstood(t *testing.T) {
+	var c iamproxy.Config
+	fs := flag.NewFlagSet("iam-proxy", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	c.BindFlags(fs)
+	args := []string{
+		"--listen=:8080", "--health-listen=:8081", "--upstream=http://127.0.0.1:5000", "--upstream-ready-path=/readyz",
+		"--registry-id=abc123", "--public=false",
+		"--jwks-url=https://iam.example.test/jwks", "--jwks-ca=/ca", "--issuer=https://iam.example.test", "--audience=registry",
+		"--kaname-address=kaname.iam-system.svc:9090", "--kaname-server-name=kaname.iam-system.svc", "--kaname-ca=/ca",
+		"--check-timeout=2s", "--cache-ttl=10s",
+		"--enroll-url=https://registry-operator.registry-system.svc:8443", "--enroll-ca=/ca", "--enroll-token-file=/tok", "--enroll-timeout=15s",
+		"--realm=https://registry.example.test/iam/token", "--service=registry",
+	}
+	if err := fs.Parse(args); err != nil {
+		t.Fatalf("the flags of the instance chart are not understood: %v", err)
+	}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("the configuration of the instance chart is refused: %v", err)
 	}
 }
