@@ -1,0 +1,20 @@
+# Бакет заказа: ключи пишутся в лист namespaces/<login>/apps/docker-registry/zot-<id>.
+apiVersion: observed.registry.in-cloud.io/v1alpha1
+kind: ObservedS3BucketClaimTemplate
+metadata:
+  name: zot-s3-v1
+spec:
+  templateName: zot-s3
+  version: v1
+  value: |
+    vaultConfigRef:
+      name: {{ .Params.storage.vaultConfig | toJson }}
+    clusterRef:
+      name: {{ printf "zot-%s" .ID | toJson }}
+    customerLogin: {{ .Login | toJson }}
+    bucket:
+      managedBy: SYSTEM
+      public: false
+    vault:
+      secretsPrefix: {{ .Params.storage.secretsPrefix | toJson }}
+      destinationPath: {{ printf "namespaces/%s/apps/docker-registry/zot-%s" .Login .ID | toJson }}

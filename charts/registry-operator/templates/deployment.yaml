@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ro.name" . }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "ro.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicas }}
+  selector:
+    matchLabels: {{- include "ro.selector" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "ro.selector" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include "ro.config" . | sha256sum }}
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: operator
+        image: {{ include "ro.image" . }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        args:
+        - --config=/etc/registry-operator/config.yaml
+        - --leader-elect={{ .Values.leaderElect }}
+        - --max-concurrent-reconciles={{ .Values.maxConcurrentReconciles }}
+        - --metrics-bind-address=:{{ .Values.metrics.port }}
+        - --health-probe-bind-address=:8081
+        ports:
+        - name: enrollment
+          containerPort: {{ .Values.enrollment.port }}
+        - name: metrics
+          containerPort: {{ .Values.metrics.port }}
+        - name: probes
+          containerPort: 8081
+        livenessProbe:
+          httpGet: {path: /healthz, port: probes}
+          initialDelaySeconds: 15
+        readinessProbe:
+          httpGet: {path: /readyz, port: probes}
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: [ALL]
+        resources: {{- toYaml .Values.resources | nindent 10 }}
+        volumeMounts:
+        - name: config
+          mountPath: /etc/registry-operator/config.yaml
+          subPath: config.yaml
+          readOnly: true
+        - name: kaname-client
+          mountPath: /etc/registry-operator/kaname
+          readOnly: true
+        - name: enrollment-tls
+          mountPath: /etc/registry-operator/enrollment
+          readOnly: true
+      volumes:
+      - name: config
+        configMap:
+          name: {{ include "ro.name" . }}-config
+      - name: kaname-client
+        secret:
+          secretName: {{ .Values.kaname.certificate.secretName }}
+      - name: enrollment-tls
+        secret:
+          secretName: {{ .Values.enrollment.certificate.secretName }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}

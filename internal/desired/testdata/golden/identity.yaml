@@ -1,0 +1,27 @@
+apiVersion: iam.kaname.in-cloud.io/v1alpha1
+kind: ServiceAccount
+metadata:
+  name: zot-abc123-ci
+  namespace: cust01
+  labels:
+    app.kubernetes.io/managed-by: registry-operator
+    registry.in-cloud.io/id: abc123
+    registry.in-cloud.io/namespace: cust01
+    registry.in-cloud.io/owner-uid: 6f1c2a3b-4d5e-4f60-8a71-92b3c4d5e6f7
+    registry.in-cloud.io/template: zot-v1
+    registry.in-cloud.io/step: identity
+spec:
+  name: zot-abc123-ci
+  description: CI robot of registry abc123
+  enabled: true
+  labels:
+    registry: abc123
+  keys:
+  - name: push
+    kind: Secret
+    ttlSeconds: 2592000
+    delivery:
+      vault:
+        app: docker-registry
+        instance: zot-abc123
+  deletionPolicy: Delete

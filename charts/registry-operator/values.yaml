@@ -1,0 +1,62 @@
+# Образ оператора: тег и digest задаёт посадка; без digest — отказ рендера.
+image:
+  repository: prorobotech/registry-operator
+  tag: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+
+replicas: 2
+leaderElect: true
+maxConcurrentReconciles: 4
+
+serviceAccount:
+  name: registry-operator
+
+# Конфигурация оператора (config.yaml): политика площадки, сверка чарта,
+# kaname, эндпоинт заявок, темп. Пути файлов kaname и эндпоинта ставит чарт
+# (секреты сертификатов ниже) — здесь их не задают. Пусто — отказ рендера.
+config: {}
+
+# Лист службы registry для внутреннего листенера kaname (:9091). SAN —
+# spiffe://<trustDomain>/ns/<namespace релиза>/sa/kacho-<moduleName>.
+kaname:
+  moduleName: registry
+  trustDomain: cluster.local
+  certificate:
+    # true — Certificate cert-manager от issuerRef (центр, которому доверяет
+    # kaname); false — секрет secretName ставит платформа.
+    create: true
+    secretName: registry-operator-kaname-client
+    issuerRef:
+      name: ""
+      kind: ClusterIssuer
+      group: cert-manager.io
+    duration: 2160h
+    renewBefore: 360h
+
+# Эндпоинт заявок рабочей нагрузки zot на репозитории (TLS).
+enrollment:
+  port: 8443
+  certificate:
+    create: true
+    secretName: registry-operator-enrollment-tls
+    issuerRef:
+      name: ""
+      kind: ClusterIssuer
+      group: cert-manager.io
+    duration: 2160h
+    renewBefore: 360h
+
+metrics:
+  port: 8080
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

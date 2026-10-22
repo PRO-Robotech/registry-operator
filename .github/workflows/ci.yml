@@ -1,0 +1,116 @@
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  generate:
+    name: generated files are current
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go mod tidy && git diff --exit-code -- go.mod go.sum
+      - run: make verify-generated
+
+  test:
+    name: unit and envtest (-race)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: make test
+        run: make test 2>&1 | tee test.log; exit ${PIPESTATUS[0]}
+      - name: census
+        if: always()
+        run: |
+          echo "packages ok:   $(grep -c '^ok ' test.log || true)"
+          echo "packages FAIL: $(grep -c '^FAIL' test.log || true)"
+          echo "no test files: $(grep -c 'no test files' test.log || true)"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-log
+          path: test.log
+
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: make lint
+
+  chart:
+    name: chart renders a configuration the operator accepts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+      - run: helm lint charts/registry-operator -f charts/registry-operator/ci/test-values.yaml
+      - name: render and check the configuration
+        run: |
+          helm template t charts/registry-operator -n registry-system -f charts/registry-operator/ci/test-values.yaml > rendered.yaml
+          yq 'select(.kind == "ConfigMap") | .data["config.yaml"]' rendered.yaml > config.yaml
+          go run ./hack/checkconfig config.yaml
+      - name: refusals have their reason
+        run: |
+          set +e
+          out=$(helm template t charts/registry-operator -f charts/registry-operator/ci/test-values.yaml --set image.digest= 2>&1); code=$?
+          set -e
+          [ $code -ne 0 ] && grep -q 'image.tag and image.digest' <<<"$out"
+
+  docker:
+    name: images
+    runs-on: ubuntu-latest
+    needs: [test, lint]
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - id: tag
+        run: echo "tag=$(echo "${GITHUB_REF_NAME}" | sed 's#/#-#g')-${GITHUB_SHA::8}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - id: login
+        name: login to Docker Hub
+        env:
+          USER: ${{ secrets.DOCKERHUB_USERNAME }}
+          TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -z "$USER" ] || [ -z "$TOKEN" ]; then echo "push=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          echo "$TOKEN" | docker login -u "$USER" --password-stdin
+          echo "push=true" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: ${{ steps.login.outputs.push == 'true' }}
+          provenance: false
+          tags: prorobotech/registry-operator:${{ steps.tag.outputs.tag }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.iam-proxy
+          push: ${{ steps.login.outputs.push == 'true' }}
+          provenance: false
+          tags: prorobotech/registry-iam-proxy:${{ steps.tag.outputs.tag }}
+      - run: echo "pushed=${{ steps.login.outputs.push }} tag=${{ steps.tag.outputs.tag }}"
