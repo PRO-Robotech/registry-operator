@@ -216,7 +216,16 @@ func TestPipeline_UnconfirmedProjectFollowsTheLabel(t *testing.T) {
 		return registeredInIAM(id, "prj10x")
 	})
 
+	// Ответы всё ещё теряются: намерение обязано перейти под новую метку
+	// раньше, чем хоть одна регистрация подтвердится, — иначе проба мерила
+	// бы, кто быстрее: кэш namespace или снятие флага.
 	relabel(t, ns, "prj10")
+	eventually(t, wait, "the unconfirmed intent follows the label", func() error {
+		if r := reservation(t, id).Status.Registration; r == nil || r.Project != "prj10" || r.RegisteredAt != nil {
+			return fmt.Errorf("reservation registration %+v", r)
+		}
+		return registeredInIAM(id, "prj10")
+	})
 	kn.SetLanded(obj, false)
 	eventually(t, wait, "registered under the corrected project", func() error { return registeredInIAM(id, "prj10") })
 	eventually(t, wait, "confirmed in the reservation", func() error {
