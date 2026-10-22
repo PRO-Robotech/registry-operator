@@ -11,9 +11,9 @@
 // ключей kaname, Check «о себе» тем же токеном, кэш вердиктов), перед
 // двойником zot на loopback; регистри и репозитории записаны в kaname
 // личностью модуля registry по mTLS. Проект, учётку и выдачи заводит сама
-// проба через API администратора стенда (бутстрап-удостоверение), аккаунт —
-// kacho-system: машина аккаунт не заводит (аккаунт принадлежит человеку,
-// kaname account/create.go). Всё заведённое снимается t.Cleanup и на
+// проба через API администратора стенда (бутстрап-удостоверение); аккаунт —
+// существующий, которым человек пробы не владеет: машина аккаунт не заводит
+// (аккаунт принадлежит человеку, kaname account/create.go). Всё заведённое снимается t.Cleanup и на
 // падении. Адресов и учётных данных в дереве нет: всё приходит из окружения
 // скрипта. Окружения нет — проба не выполнилась (код 3 TestMain), а не
 // прошла.
@@ -57,7 +57,7 @@ var envNames = []string{
 	"REGOP_IT_INTERNAL_ADDR", "REGOP_IT_INTERNAL_SERVER_NAME",
 	"REGOP_IT_PUBLIC_ADDR", "REGOP_IT_PUBLIC_SERVER_NAME",
 	"REGOP_IT_REST_URL", "REGOP_IT_TOKEN_URL", "REGOP_IT_JWKS_URL",
-	"REGOP_IT_ISSUER", "REGOP_IT_AUDIENCE", "REGOP_IT_SYSTEM_ACCOUNT", "REGOP_IT_TLS_DIR",
+	"REGOP_IT_ISSUER", "REGOP_IT_AUDIENCE", "REGOP_IT_TLS_DIR",
 }
 
 var env = map[string]string{}
@@ -236,19 +236,27 @@ func newWorld(t *testing.T) *world {
 	w := &world{adm: bootstrap(t), roles: map[string]string{}}
 	run := runID(t)
 
+	w.human = subject{name: "human", typ: "user", id: readSecret(t, "human.id"), token: readSecret(t, "human.token")}
+	// Аккаунт пробы — первый по id из тех, которыми человек пробы не владеет:
+	// владелец прошёл бы любую строку таблицы, а аккаунт машина не заводит.
 	code, accs := w.adm.call(http.MethodGet, "/iam/v1/accounts?pageSize=1000", nil)
 	if code != http.StatusOK {
 		t.Fatalf("accounts: %d %v", code, accs)
 	}
 	list, _ := accs["accounts"].([]any)
+	var seen []string
 	for _, a := range list {
-		if m, ok := a.(map[string]any); ok && m["name"] == env["REGOP_IT_SYSTEM_ACCOUNT"] {
-			w.account, _ = m["id"].(string)
+		m, _ := a.(map[string]any)
+		id, _ := m["id"].(string)
+		seen = append(seen, fmt.Sprintf("%v (owner %v)", m["name"], m["ownerUserId"]))
+		if id != "" && m["ownerUserId"] != w.human.id && (w.account == "" || id < w.account) {
+			w.account = id
 		}
 	}
 	if w.account == "" {
-		t.Fatalf("account %s is not among %d accounts", env["REGOP_IT_SYSTEM_ACCOUNT"], len(list))
+		t.Fatalf("no account the probe human does not own among %d: %v", len(list), seen)
 	}
+	t.Logf("account of the probe: %s (of %d: %v)", w.account, len(list), seen)
 
 	prj := w.adm.operation(http.MethodPost, "/iam/v1/projects", map[string]any{
 		"accountId": w.account, "name": "regop-it-" + run, "description": "registry-operator kanameit " + run,
@@ -283,7 +291,6 @@ func newWorld(t *testing.T) *world {
 	w.sa = subject{name: "service account", typ: "service_account", id: str(sva, "id", "service account", t)}
 	t.Cleanup(func() { w.adm.call(http.MethodDelete, "/iam/v1/serviceAccounts/"+w.sa.id, nil) })
 	w.sa.token = w.saToken(t, env["REGOP_IT_AUDIENCE"])
-	w.human = subject{name: "human", typ: "user", id: readSecret(t, "human.id"), token: readSecret(t, "human.token")}
 
 	w.kn = registrar(t)
 	w.reg, w.other = "it"+run, "io"+run

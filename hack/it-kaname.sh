@@ -189,7 +189,6 @@ PY
 	export REGOP_IT_ISSUER="$ISSUER"
 	export REGOP_IT_AUDIENCE="$AUDIENCE"
 	export REGOP_IT_FOREIGN_AUDIENCE="$FOREIGN_AUDIENCE"
-	export REGOP_IT_SYSTEM_ACCOUNT="$SYSTEM_ACCOUNT"
 	export REGOP_IT_TLS_DIR="$WORK"
 	cd "$HERE" && go test -tags=kanameit ./test/kanameit/ -count=1 -v -timeout 20m "$@"
 }
