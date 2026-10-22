@@ -4,11 +4,20 @@
   - tpl, lookup, .Capabilities и metadata.namespace не используются: namespace ставит
     Argo CD по destination Application, рендер не зависит от кластера;
   - имена объектов — zot-<id>; ownerReferences нет — снятие идёт через Argo CD;
-  - чарт ставит только рабочую нагрузку zot: ресурсов с состоянием в нём нет.
+  - чарт ставит только zot и iam-proxy: ресурсов с состоянием в нём нет.
 */}}
 
 {{- define "ri.base" -}}
 {{- printf "zot-%s" .Values.instance.id -}}
+{{- end -}}
+
+{{/* Пути внутри пода: CA площадки и projected-токен входа в эндпоинт регистрации. */}}
+{{- define "ri.caPath" -}}
+{{- printf "/etc/registry/ca/%s" .Values.site.caBundle.key -}}
+{{- end -}}
+
+{{- define "ri.registrationTokenDir" -}}
+/var/run/secrets/registry-operator
 {{- end -}}
 
 {{/*
@@ -42,6 +51,9 @@ ri.check сверяет пути заказа с его id и login: под чи
 {{- end -}}
 {{- if not (contains "/data/" .Values.vault.secretPath) -}}
 {{- fail (printf "vault.secretPath %q must be a KV v2 read path (<mount>/data/...)" .Values.vault.secretPath) -}}
+{{- end -}}
+{{- if eq .Values.site.vault.tokenAudience .Values.site.registryOperator.tokenAudience -}}
+{{- fail (printf "site.vault.tokenAudience and site.registryOperator.tokenAudience must differ: one token audience %q would let each peer replay the token to the other" .Values.site.vault.tokenAudience) -}}
 {{- end -}}
 {{- end -}}
 
@@ -78,12 +90,6 @@ registry.in-cloud.io/id: {{ .Values.instance.id | toJson }}
 {{- dict "host" (first $hp) "port" $port | toJson -}}
 {{- end -}}
 
-{{/* ri.hostPort разбирает host:port в {host, port}. */}}
-{{- define "ri.hostPort" -}}
-{{- $hp := splitList ":" . -}}
-{{- dict "host" (first $hp) "port" (last $hp | atoi) | toJson -}}
-{{- end -}}
-
 {{/*
 Шаблон vault-agent для config.json zot. Всё, кроме ключей бакета, — значения заказа,
 напечатанные toJson; ключи (accessKey, secretKey) vault-agent берёт из листа, который
@@ -101,26 +107,19 @@ registry.in-cloud.io/id: {{ .Values.instance.id | toJson }}
 {{- printf "{{- with secret %q -}}%s{{- end -}}" (include "ri.noBraces" .Values.vault.secretPath) $json -}}
 {{- end -}}
 
-{{/* Шаблон vault-agent клиентского сертификата сайдкара: сертификат, ключ и CA в одном PEM. */}}
-{{- define "ri.tlsTemplate" -}}
-{{- $p := .Values.site.vault.pki -}}
-{{- $path := printf "%s/issue/%s" $p.mount $p.role | include "ri.noBraces" -}}
-{{- $cn := printf "common_name=%s" $p.commonName | include "ri.noBraces" -}}
-{{- $san := printf "uri_sans=%s" $p.uriSAN | include "ri.noBraces" -}}
-{{- printf "{{- with pkiCert %q %q %q \"ttl=24h\" -}}{{ .Cert }}{{ .Key }}{{ .CA }}{{- end -}}" $path $cn $san -}}
-{{- end -}}
-
 {{/*
-Имена DNS, которые под вправе разрешать: хост S3, FQDN-пиры и хосты адресов Vault и
-kaname. Выход по L3 держат отдельные правила; DNS лишь не отвечает на прочие имена.
+Имена DNS, которые под вправе разрешать: хост S3, FQDN-пиры и хосты адресов Vault,
+публичного API kaname, его набора ключей и эндпоинта регистрации. Выход по L3 держат
+отдельные правила; DNS лишь не отвечает на прочие имена.
 */}}
 {{- define "ri.dnsNames" -}}
+{{- $n := .Values.site.network -}}
 {{- $names := list (include "ri.url" .Values.storage.endpoint | fromJson).host -}}
-{{- range (concat .Values.site.network.vault .Values.site.network.kaname) -}}
+{{- range (concat $n.vault $n.kaname $n.registryOperator) -}}
 {{- if .fqdn -}}{{- $names = append $names .fqdn -}}{{- end -}}
 {{- end -}}
-{{- $names = append $names (include "ri.url" .Values.site.vault.address | fromJson).host -}}
-{{- $names = append $names (include "ri.url" .Values.site.kaname.jwksURL | fromJson).host -}}
-{{- $names = append $names (include "ri.hostPort" .Values.site.kaname.checkAddress | fromJson).host -}}
+{{- range (list .Values.site.vault.address .Values.site.kaname.apiURL .Values.site.kaname.jwksURL .Values.site.registryOperator.registrationURL) -}}
+{{- $names = append $names (include "ri.url" . | fromJson).host -}}
+{{- end -}}
 {{- $names | uniq | sortAlpha | toJson -}}
 {{- end -}}

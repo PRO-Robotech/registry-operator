@@ -20,7 +20,6 @@ metadata:
     {{- include "rp.labels" . | nindent 4 }}
 data:
   registryOperator: {{ $au.registryOperator | toJson }}
-  registrar: {{ $au.registrar | toJson }}
   addonsOperator: {{ $au.addonsOperator | toJson }}
   argoController: {{ $au.argoController | toJson }}
   replicaSetController: {{ $au.replicaSetController | toJson }}
@@ -29,7 +28,6 @@ data:
   platformUsers: {{ join "," $au.platformUsers | toJson }}
   platformGroups: {{ join "," $au.platformGroups | toJson }}
   allowedRoles: {{ join "," $ad.allowedRoles | toJson }}
-  pkiPolicy: {{ $ad.pkiPolicy | toJson }}
   vaultConfig: {{ $ad.vault.config | toJson }}
   s3Config: {{ $ad.vault.s3Config | toJson }}
   authMount: {{ $ad.vault.authMount | toJson }}
@@ -66,11 +64,11 @@ data:
     (dict "expression" "request.operation == 'DELETE' || !variables.isOp || (variables.id != '' && variables.o.metadata.name.startsWith('zot-' + variables.id + '-') && variables.o.metadata.?labels[?'registry.in-cloud.io/namespace'].orValue('') == request.namespace)" "message" "a zot-<id>-* IAM object carries its id and namespace labels")
     (dict "expression" "request.resource.resource != 'accessbindings' || request.operation == 'DELETE' || !variables.isOp || (object.spec.roleRef.name in params.data.allowedRoles.split(',') && size(object.spec.target.resources) == 1 && object.spec.target.resources[0].type == 'registry.registries' && object.spec.target.resources[0].id == variables.id && object.spec.subjects.all(s, has(s.serviceAccountRef) && s.serviceAccountRef.name.startsWith('zot-' + variables.id + '-')))" "message" "a registry binding grants an allowed role on its own registry to its own robots only"))) }}
 
-{{- /* V2: статус заказа и резерва — только их писатели. */}}
+{{- /* V2: статус заказа и резерва — только registry-operator, единственный их писатель. */}}
 {{- $policies = append $policies (dict "id" "v2" "name" "registry-status"
   "rules" (list (dict "apiGroups" (list "registry.in-cloud.io") "resources" (list "registries/status" "registryidreservations/status") "operations" (list "UPDATE")))
   "checks" (list
-    (dict "expression" "variables.isPlatform || variables.isOp || (request.resource.resource == 'registries' && request.userInfo.username == params.data.registrar)" "message" "registry status is written only by registry-operator and the registrar; reservation status only by registry-operator"))) }}
+    (dict "expression" "variables.isPlatform || variables.isOp" "message" "registry and reservation status are written only by registry-operator"))) }}
 
 {{- /* V3: маршрут заказа — только registry-operator и только своей формы. */}}
 {{- $policies = append $policies (dict "id" "v3" "name" "registry-route"
@@ -179,7 +177,7 @@ data:
   "match" "(request.operation == 'DELETE' ? oldObject : object).metadata.name.startsWith('zot-')"
   "checks" (list
     (dict "expression" (printf "variables.isOp || variables.isPlatform || (request.operation == 'UPDATE' && %s && %s)" (include "rp.same" "spec") (include "rp.same" "metadata.labels")) "message" "zot-* Vault claims are written only by registry-operator; other writers may change only metadata outside labels")
-    (dict "expression" "request.resource.resource != 'vaultclaims' || request.operation == 'DELETE' || !variables.isOp || (object.spec.vaultConfigRef.name == params.data.vaultConfig && object.spec.secretsPrefix == params.data.secretsPrefix && object.spec.auth.mountPath == params.data.authMount && has(object.spec.auth.manageConfig) && !object.spec.auth.manageConfig && !object.spec.auth.?autoCreate.orValue(false) && object.spec.auth.?rolePruning.orValue('') == 'Owned' && !has(object.spec.transit) && !has(object.spec.clusterRef) && size(object.spec.roles) == 1 && object.spec.roles[0].name == object.metadata.name && object.spec.roles[0].boundServiceAccounts.?names.orValue([]) == [object.metadata.name] && object.spec.roles[0].boundServiceAccounts.namespace == request.namespace && object.spec.roles[0].?policies.orValue([]).all(p, p == params.data.pkiPolicy || object.spec.?policies.orValue([]).exists(q, q.name == p)) && object.spec.?policies.orValue([]).all(q, q.name.startsWith(object.metadata.name + '-') && !has(q.rules) && q.?identityPaths.orValue([]).all(ip, ip.path.endsWith('/namespaces/{serviceAccountNamespace}/apps/docker-registry/{serviceAccountName}') && ip.capabilities.all(c, c == 'read'))))" "message" "a registry Vault claim is a guest on the platform mount with one role for its own service account, reading only its own leaf")
+    (dict "expression" "request.resource.resource != 'vaultclaims' || request.operation == 'DELETE' || !variables.isOp || (object.spec.vaultConfigRef.name == params.data.vaultConfig && object.spec.secretsPrefix == params.data.secretsPrefix && object.spec.auth.mountPath == params.data.authMount && has(object.spec.auth.manageConfig) && !object.spec.auth.manageConfig && !object.spec.auth.?autoCreate.orValue(false) && object.spec.auth.?rolePruning.orValue('') == 'Owned' && !has(object.spec.transit) && !has(object.spec.clusterRef) && size(object.spec.roles) == 1 && object.spec.roles[0].name == object.metadata.name && object.spec.roles[0].boundServiceAccounts.?names.orValue([]) == [object.metadata.name] && object.spec.roles[0].boundServiceAccounts.namespace == request.namespace && object.spec.roles[0].?policies.orValue([]).all(p, object.spec.?policies.orValue([]).exists(q, q.name == p)) && object.spec.?policies.orValue([]).all(q, q.name.startsWith(object.metadata.name + '-') && !has(q.rules) && q.?identityPaths.orValue([]).all(ip, ip.path.endsWith('/namespaces/{serviceAccountNamespace}/apps/docker-registry/{serviceAccountName}') && ip.capabilities.all(c, c == 'read'))))" "message" "a registry Vault claim is a guest on the platform mount with one role for its own service account, reading only its own leaf")
     (dict "expression" "request.resource.resource != 's3bucketclaims' || request.operation == 'DELETE' || !variables.isOp || (object.spec.vaultConfigRef.name == params.data.s3Config && object.spec.customerLogin == request.namespace && object.spec.vault.secretsPrefix == params.data.secretsPrefix && object.spec.vault.destinationPath == 'namespaces/' + request.namespace + '/apps/docker-registry/' + object.metadata.name && !object.spec.?bucket.?public.orValue(false) && !has(object.spec.bucket.name))" "message" "a registry bucket is private, new and writes its keys only to its own leaf"))) }}
 
 {{- /* V15: Application заказов — создаёт и снимает только addons-operator. */}}

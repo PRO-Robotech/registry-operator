@@ -1,10 +1,11 @@
 apiVersion: v2
 name: registry-instance
 description: >-
-  The zot workload of one on-demand registry: its service account, pod network
-  policy, Service and Deployment (zot on S3 with the svc-registry authorization
-  sidecar). Installed through an Addon written by registry-operator, which owns
-  the bucket, the Vault role, the IAM robot and binding and the edge route.
+  The zot of one on-demand registry with its iam-proxy: service account, pod
+  network policy, Service and Deployment (zot on S3 behind iam-proxy, which
+  checks each request with the client's own kaname token). Installed through an
+  Addon written by registry-operator, which owns the bucket, the Vault role, the
+  IAM robot, binding and resource tuple and the edge route.
 type: application
 version: 1.0.0
 appVersion: "v2.1.20"

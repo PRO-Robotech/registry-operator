@@ -1,7 +1,7 @@
 # Объекты платформы для регистри по заказу. Ставятся один раз на кластер.
 # registry-operator их не создаёт: на заказ он пишет только свои ресурсы (бакет, роль
-# Vault, учётку и выдачу kaname, маршрут) и Addon zot, а Addon выбирает слои AddonValue
-# этого чарта по меткам. Обязательное включено по умолчанию; «пока без» — политики
+# Vault, учётку, выдачу и кортеж kaname, маршрут) и Addon zot, а Addon выбирает слои
+# AddonValue этого чарта по меткам. Обязательное включено по умолчанию; «пока без» — политики
 # допуска и AppProject на арендатора (выключены).
 
 # Значение метки addons.in-cloud.io/addon у слоёв; его же выбирают valuesSelectors
@@ -46,6 +46,19 @@ addon:
 # глубоко её проверяет схема registry-instance при рендере Addon (проба charts/tests
 # рендерит экземпляр с этим слоем).
 site: {}
+
+# Манифест модуля registry для kaname (files/registry.manifest.yaml): типы ресурсов
+# регистри, роли registry.puller/pusher/admin с правилами на репозитории и личность
+# модуля kacho-registry. ConfigMap с одним ключом registry.manifest.yaml — тот вид,
+# который kaname читает из каталога доставки манифестов (README.md).
+kanameModule:
+  enabled: true
+  # namespace kaname, где лежит доставка манифестов.
+  namespace: ""
+  configMapName: registry-module-manifest
+  # Аккаунт системы kaname, в котором заведена личность модуля и группа
+  # module-relation-writers.
+  systemAccount: ""
 
 # Общие маршруты края: GET /v2/ (проверка версии API клиентом docker) и выдача токена
 # /iam/token. Маршрут заказа /v2/<id>/ ставит registry-operator.
@@ -104,7 +117,6 @@ admission:
   # Учётки авторов: system:serviceaccount:<ns>:<name>.
   authors:
     registryOperator: ""
-    registrar: ""
     addonsOperator: ""
     argoController: ""
     replicaSetController: system:serviceaccount:kube-system:replicaset-controller
@@ -118,8 +130,6 @@ admission:
     - registry.puller
     - registry.pusher
     - registry.admin
-  # Политика PKI платформы, которую оператор добавляет роли Vault заказа.
-  pkiPolicy: ""
   # Форма ресурсов Vault заказа.
   vault:
     config: ""

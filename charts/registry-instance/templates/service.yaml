@@ -1,6 +1,7 @@
 ---
-# Вход в регистри — только сайдкар проверки прав (порт proxy); zot снаружи пода не слышен.
-# На этот Service ссылается маршрут края, который ставит registry-operator.
+# Вход в регистри — только iam-proxy (порт proxy); zot снаружи пода не слышен, порт проб
+# в Service не выходит. На этот Service ссылается маршрут края, который ставит
+# registry-operator.
 apiVersion: v1
 kind: Service
 metadata:

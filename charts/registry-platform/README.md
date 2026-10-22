@@ -4,6 +4,14 @@
 их не создаёт. На заказ оператор пишет свои ресурсы с состоянием и `Addon` zot, а всё
 общее для площадки доставляется этим чартом.
 
+Чарт и объекты, которые registry-operator пишет на заказ:
+
+| этап | что пишет registry-operator | откуда здесь |
+|---|---|---|
+| 1 | `S3BucketClaim`, `VaultClaim`, iam `ServiceAccount` робота, кортеж `registry_registry:<id>` в kaname | типы и личность модуля — манифест модуля kaname |
+| 2 | iam `AccessBinding` робота, `Addon` zot | роли — манифест модуля; форма `Addon` — `AddonTemplate`, значения — слои `AddonValue` |
+| 3 | `HTTPRoute /v2/<id>/` | Gateway и общие маршруты `/v2/`, `/iam/token` |
+
 ## Что включено
 
 | объект | по умолчанию | зачем |
@@ -14,6 +22,7 @@
 | `AddonPhase <addonPhase.addonName>` и `AddonValue <addonPhase.addonName>-edge` | включено | порядок объектов края, когда площадка ставит этот чарт через `Addon` |
 | `HTTPRoute registry-api-root` (`/v2/`) и `registry-token` (`/iam/token`), `ReferenceGrant` к их бэкендам | включено | общие маршруты края; маршрут заказа `/v2/<id>/` ставит оператор |
 | `Gateway` | включено | Gateway края: только `HTTPRoute` и только из namespace с метками края |
+| `ConfigMap <kanameModule.configMapName>` (ключ `registry.manifest.yaml`) | включено | манифест модуля registry для kaname: типы, роли, личность модуля |
 | `ValidatingAdmissionPolicy` V1–V15 с привязками и параметрами | **выключено** («пока без») | ограды писателей помимо оператора |
 | `AppProject <projectPrefix><login>` | **выключено** («пока без») | проект Argo CD на арендатора |
 
@@ -61,6 +70,38 @@ addons-operator связывает `AddonPhase` с `Addon` по имени. Ко
 Gateway API, которых ещё нет. При установке `helm install` фаза не действует: `Addon` с таким
 именем нет, объекты края включены значениями.
 
+## Манифест модуля kaname
+
+`files/registry.manifest.yaml` — манифест модуля `registry` (`apiVersion: iam/v1`), рендер —
+`ConfigMap` с одним ключом `registry.manifest.yaml` в `kanameModule.namespace`. Это тот вид,
+который kaname читает на старте: каждый ключ ConfigMap — файл каталога доставки манифестов
+(`manifests.mountPath`, по умолчанию `/etc/kaname/manifests`), имя ключа — `<модуль>.manifest.yaml`.
+
+- **Типы.** `registry_registry` (родитель — `project`, аккаунт kaname выводит сам) и
+  `registry_repository` (родитель — `registry_registry`). Раздел взят дословно у манифеста
+  модуля в PRO-Robotech/kacho (`services/registry/manifest.yaml` @741d340e3): блоки сверяются
+  с каноном модели доступов побайтово.
+- **Роли** — правило верхнего уровня на регистри и вложенное (`children`) на каждый его
+  репозиторий, включая созданные позже:
+
+  | роль | регистри | репозитории |
+  |---|---|---|
+  | `registry.puller` | get | get, list |
+  | `registry.pusher` | get, create | get, list, update |
+  | `registry.admin` | get, list, create, update, delete | get, list, update, delete |
+
+  Роботу CI registry-operator выдаёт `registry.pusher` точечно на `registry.registries:<id>`.
+  Права «на аккаунт» для людей и групп — выдача с областью `iam.account` и целью `allInScope`:
+  её выдаёт платформа или владелец аккаунта, не оператор.
+- **Личность модуля** `kacho-registry` в аккаунте `kanameModule.systemAccount` и её вступление
+  в `module-relation-writers`. Под ней registry-operator — единственный писатель типов
+  `registry_*` — регистрирует ресурсы (`RegisterResource` на внутреннем листенере kaname по mTLS).
+
+Каталог доставки у kaname один, и ConfigMap он монтирует один (`manifests.configMapName`
+его чарта). Площадка кладёт ключ `registry.manifest.yaml` этого объекта в доставку kaname:
+либо доставка собирается из нескольких ConfigMap (projected-том), либо производитель доставки
+берёт этот ключ отсюда. Второго манифеста модуля `registry` в доставке быть не должно.
+
 ## Политики допуска (выключены)
 
 Те же проверки registry-operator исполняет до записи, поэтому без политик он запрещённого
@@ -70,7 +111,7 @@ ConfigMap `<release>-admission` в `admission.paramsNamespace`, без пара�
 | | объект | правило |
 |---|---|---|
 | V1 | `iam.kaname.in-cloud.io` ServiceAccount, AccessBinding `zot-*` | пишет только registry-operator; выдача — роль из `admission.allowedRoles` на `registry.registries:<свой id>` своим роботам |
-| V2 | `registries/status`, `registryidreservations/status` | registry-operator; статус заказа — ещё регистратор |
+| V2 | `registries/status`, `registryidreservations/status` | только registry-operator — единственный их писатель |
 | V3 | `HTTPRoute zot-*` | только registry-operator; `/v2/<id>/` на хосте и Gateway регистри к `Service zot-<id>:8080` своего арендатора |
 | V4 | поды с SA `zot-*` | создаёт только replicaset-controller |
 | V5 | метки арендатора на namespace | только платформа |
@@ -82,7 +123,7 @@ ConfigMap `<release>-admission` в `admission.paramsNamespace`, без пара�
 | V11 | `AddonValue` слоёв чарта экземпляра | только платформа, без подстановок плагина секретов |
 | V12 | `AddonPhase` | у `Addon` заказов фаз нет; фаза площадки — только платформа |
 | V13 | `AppProject <projectPrefix>*` | только платформа; один destination — namespace арендатора, уровня кластера ничего, только рабочая нагрузка zot |
-| V14 | `VaultClaim`, `S3BucketClaim` `zot-*` | только registry-operator; гость на mount платформы, одна роль на свой SA, чтение только своего листа; бакет приватный, новый, ключи — в свой лист |
+| V14 | `VaultClaim`, `S3BucketClaim` `zot-*` | только registry-operator; гость на mount платформы, одна роль на свой SA только со своими политиками, чтение только своего листа; бакет приватный, новый, ключи — в свой лист |
 | V15 | `Application reg-*` | создаёт и снимает addons-operator; прочие не меняют spec и владельцев |
 
 Пробы V1, V3–V5, V8–V15 исполняются на kind в CI (`charts/tests/admission`); V2, V6, V7
@@ -91,5 +132,6 @@ ConfigMap `<release>-admission` в `admission.paramsNamespace`, без пара�
 ## Пробы
 
 `charts/tests/run.sh`: lint, golden рендера по умолчанию и со всем включённым
-(`charts/tests/golden/platform-*.yaml`), отрицательные пробы значений, проверки формы, схемы
-по закреплённым CRD, отсутствие Lua; `charts/tests/admission/run.sh` — политики на кластере.
+(`charts/tests/golden/platform-*.yaml`), отрицательные пробы значений, проверки формы (в том
+числе манифест модуля: типы, роли с `children`, личность модуля), схемы по закреплённым CRD,
+отсутствие Lua; `charts/tests/admission/run.sh` — политики на кластере.

@@ -1,0 +1,142 @@
+# Манифест модуля registry для kaname (apiVersion iam/v1): типы ресурсов регистри,
+# роли выдачи и личность модуля. Доставляется ключом registry.manifest.yaml в каталог
+# манифестов kaname (README.md, «Манифест модуля kaname»).
+#
+# Раздел resources взят дословно у манифеста модуля в PRO-Robotech/kacho
+# (services/registry/manifest.yaml @741d340e3): его блоки сверяются с каноном модели
+# доступов kaname побайтово, и заметки (notes) входят в сверку.
+#
+# Роли — выдача на объект registry.registries:<id> (точечно) либо на всю область
+# iam.account с allInScope (каскадно, выдаёт платформа или владелец аккаунта): правило
+# верхнего уровня даёт глаголы на сам регистри, вложенное (children) — на каждый его
+# репозиторий, включая созданные позже, если репозиторий зарегистрирован с цепью
+# [registry_registry:<id>, project:<prj>].
+#
+# Личность модуля kacho-registry — та, под которой registry-operator регистрирует
+# registry_registry:<id> и registry_repository:<id>/<repo> (RegisterResource на
+# внутреннем листенере kaname по mTLS); вступление в module-relation-writers даёт ей
+# право писать кортежи владения. Аккаунт системы подставляет чарт
+# (kanameModule.systemAccount).
+
+apiVersion: iam/v1
+module: registry
+
+resources:
+
+  - name: registries
+    objectType: registry_registry
+    parents: [project]
+    producer: derived
+    notes:
+      - before: v_get
+        text: |
+          # #64 Defect A: v_* derive from `owner` so a registry's CREATOR/OWNER (the
+          # RegisterResource `owner` tuple) holds the full CRUD verb-set on their own
+          # registry — esp. v_create (create repositories). Without this the owner got
+          # only editor-tier v_get/v_list/v_update/v_delete (the `edit` role authors no
+          # `create` verb) and CreateRepository denied → 404 for the owner. Per-OBJECT
+          # computed relation (like `editor: this or admin`), NOT a hierarchy cascade.
+          #
+          # `v_create` LIVES HERE AND NOWHERE ELSE — do not "restore parity" by adding it
+          # back to the other types. A registry is a CONTAINER: "create a repository in
+          # this namespace" is a real operation on the registry object, and it is really
+          # asked — by the control plane (CreateRepository / RenameRepository) and by the
+          # data plane (docker push to a new repo, cross-repo mount into a new dst, and
+          # the first-push blob-reveal guard). Every other type answered a question no
+          # request ever asks: "create" is not an operation on an already-existing object,
+          # and creating a resource inside a scope is authorized by the write tier on that
+          # scope. Locked by authzmap/verb_relation_has_reader_test.go, which reds with the
+          # type name if a reader-less carrier reappears.
+    relations:
+      - name: owner
+        definition: '[user, service_account]'
+        position: beforeTiers
+    verbs:
+      - {name: get, from: [owner, super_admin]}
+      - {name: list, from: [owner, super_admin]}
+      - {name: create, from: [owner, super_admin]}
+      - {name: update, from: [owner, super_admin]}
+      - {name: delete, from: [owner, super_admin]}
+      - {name: internalGetRegistryStats, class: get, internal: true}
+      - {name: internalTriggerGarbageCollection, class: delete, internal: true}
+
+  - name: repositories
+    objectType: registry_repository
+    parents:
+      - {name: parent, type: registry_registry}
+    producer: authored
+    notes:
+      - before: super_admin
+        text: |
+          # A repository has no project pointer of its own — it is a child of its
+          # registry, and the registry is the one anchored to a project.
+      - before: v_get
+        text: |
+          # RG-1 D-7: `user:*` public-read wildcard — anonymous pull of a PUBLIC repo.
+          # The wildcard grants v_get ONLY on repos that ALSO carry an explicit
+          # `user:* v_get` tuple emitted by the registry overlay (visibility=PUBLIC);
+          # absent that tuple `user:*` has no access → uniform 404. ONLY v_get gains
+          # the wildcard — no write relation does (anon is a read-only floor, B14).
+          # #64 Defect A: v_* derive from `owner` (repo creator/pusher owner-tuple) so
+          # the repo owner fully manages their own repository; `user:*` wildcard stays
+          # on v_get ONLY (anonymous public-read floor, B14).
+    relations:
+      - name: owner
+        definition: '[user, service_account]'
+        position: beforeTiers
+    verbs:
+      - {name: get, subjects: ['user:*', user, service_account, 'group#member'], from: [owner, super_admin]}
+      - {name: list, from: [owner, super_admin]}
+      - {name: update, from: [owner, super_admin]}
+      - {name: delete, from: [owner, super_admin]}
+
+roles:
+
+  - id: registry.puller
+    description: >
+      Чтение образов реестра, названного целью выдачи, и каждого его
+      репозитория, включая созданные позже.
+    tier: {tierType: iam.cluster, tierId: cluster_root}
+    rules:
+      - module: registry
+        resources: [registries]
+        classes: [get]
+        children:
+          - resources: [repositories]
+            classes: [get, list]
+
+  - id: registry.pusher
+    description: >
+      Публикация и чтение образов реестра, названного целью выдачи: новые
+      репозитории и запись в каждый его репозиторий.
+    tier: {tierType: iam.cluster, tierId: cluster_root}
+    rules:
+      - module: registry
+        resources: [registries]
+        classes: [get, create]
+        children:
+          - resources: [repositories]
+            classes: [get, list, update]
+
+  - id: registry.admin
+    description: >
+      Управление реестром, названным целью выдачи, и всеми его
+      репозиториями.
+    tier: {tierType: iam.cluster, tierId: cluster_root}
+    rules:
+      - module: registry
+        resources: [registries]
+        classes: [get, list, create, update, delete]
+        children:
+          - resources: [repositories]
+            classes: [get, list, update, delete]
+
+seed:
+  serviceAccounts:
+    - name: kacho-registry
+      account: zzph-system-account
+      description: "Module SA: kacho-registry (SEC-C least-priv)"
+  joins:
+    - serviceAccount: {account: zzph-system-account, name: kacho-registry}
+      group: {account: zzph-system-account, name: module-relation-writers}
+      why: "писать кортежи владения через iam, не ходя в хранилище прав напрямую (#914)"

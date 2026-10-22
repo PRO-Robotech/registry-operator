@@ -1,8 +1,10 @@
 {{- $s3 := include "ri.url" .Values.storage.endpoint | fromJson }}
+{{- $n := .Values.site.network }}
 ---
 # Сеть пода zot. На площадке действует запрет по умолчанию, поэтому разрешено ровно:
-# вход — прокси Envoy Gateway своего Gateway на :8080 (и kubelet на :8080, если
-# площадка его включила); выход — DNS (только нужные имена), S3 заказа, Vault, kaname.
+# вход — прокси Envoy Gateway своего Gateway на :8080 (и kubelet на порт проб :8081,
+# если площадка его включила); выход — DNS (только нужные имена), S3 заказа, Vault,
+# публичный API kaname (Check и JWKS) и эндпоинт регистрации registry-operator.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -25,19 +27,19 @@ spec:
         - ports:
             - port: "8080"
               protocol: TCP
-    {{- if .Values.site.network.allowKubeletProbes }}
+    {{- if $n.allowKubeletProbes }}
     - fromEntities:
         - host
       toPorts:
         - ports:
-            - port: "8080"
+            - port: "8081"
               protocol: TCP
     {{- end }}
   egress:
     - toEndpoints:
         - matchLabels:
-            k8s:io.kubernetes.pod.namespace: {{ .Values.site.network.dns.namespace | toJson }}
-            {{- range $k, $v := .Values.site.network.dns.labels }}
+            k8s:io.kubernetes.pod.namespace: {{ $n.dns.namespace | toJson }}
+            {{- range $k, $v := $n.dns.labels }}
             {{ printf "k8s:%s" $k | toJson }}: {{ $v | toJson }}
             {{- end }}
       toPorts:
@@ -58,7 +60,7 @@ spec:
         - ports:
             - port: {{ $s3.port | int | toString | toJson }}
               protocol: TCP
-    {{- range (concat .Values.site.network.vault .Values.site.network.kaname) }}
+    {{- range (concat $n.vault $n.kaname $n.registryOperator) }}
     {{- if .fqdn }}
     - toFQDNs:
         - matchName: {{ .fqdn | toJson }}
@@ -80,3 +82,4 @@ spec:
               protocol: TCP
             {{- end }}
     {{- end }}
+{{- include "ri.check" . }}

@@ -1,7 +1,7 @@
-# Чарт ставит ровно рабочую нагрузку zot одного регистри: ServiceAccount, сетевую
-# политику пода, Service и Deployment. Бакет, роль Vault, учётку и выдачу kaname и
-# маршрут края заводит и ведёт registry-operator сам; сюда он передаёт только пути
-# к ним — через Addon.spec.variables и слой заказа платформы (README.md, «Контракт»).
+# Чарт ставит ровно zot одного регистри с прокси прав iam-proxy: ServiceAccount, сетевую
+# политику пода, Service и Deployment. Бакет, роль Vault, учётку и выдачу kaname, кортеж
+# ресурса и маршрут края заводит и ведёт registry-operator сам; сюда он передаёт только
+# пути к ним — через Addon.spec.variables и слой заказа платформы (README.md, «Контракт»).
 #
 # Обязательное здесь пусто: рендер без слоя заказа и слоя площадки отказывает по
 # values.schema.json, молчаливых умолчаний нет.
@@ -17,6 +17,8 @@ instance:
   # Эпоха синхронизации: оператор увеличивает её, чтобы Argo CD повторил исчерпанную
   # синхронизацию (источник Application меняется). В объекты не печатается.
   syncEpoch: 0
+  # Registry.spec.public: true — pull без токена; push и прочее — только с токеном.
+  public: false
 
 # Бакет заказа: значения из S3BucketClaim (status.bucketName, status.endpoint, spec.region).
 storage:
@@ -37,37 +39,41 @@ vault:
 
 # Константы площадки: слой площадки платформы (priority 10).
 site:
+  # ConfigMap в namespace заказа с CA, которым подписаны Vault, публичный API kaname и
+  # эндпоинт регистрации registry-operator (раздаёт платформа).
+  caBundle:
+    configMap: ""
+    key: ca.crt
   vault:
     # Адрес Vault для vault-agent; только https.
     address: ""
-    # ConfigMap с CA Vault и kaname в namespace заказа (раздаёт платформа).
-    caConfigMap:
-      name: ""
-      key: ca.crt
     # Аудитория projected-токена SA пода для входа vault-agent; равна audience роли.
     tokenAudience: vault
-    # PKI клиентского сертификата сайдкара (mTLS к kaname :9091).
-    pki:
-      mount: ""
-      role: ""
-      commonName: ""
-      uriSAN: ""
   kaname:
-    # host:9091 внутреннего листенера kaname (Check по mTLS).
-    checkAddress: ""
-    # https://host:9097/... — набор ключей kaname (JWKS).
+    # Публичный API kaname: AuthorizeService.Check токеном клиента «о себе».
+    apiURL: ""
+    # Набор ключей kaname (JWKS); только https.
     jwksURL: ""
-  sidecar:
-    # Аудитория JWT kaname, которую принимает сайдкар.
+    # iss токенов kaname, которые принимает прокси.
+    issuer: ""
+    # aud токенов kaname, которые принимает прокси.
     audience: registry
+  registryOperator:
+    # Эндпоинт регистрации нового репозитория (registry-operator); только https.
+    registrationURL: ""
+    # Аудитория projected-токена SA пода, которым прокси входит в эндпоинт регистрации;
+    # registry-operator проверяет её через TokenReview.
+    tokenAudience: registry-operator
+  iamProxy:
+    # Срок кэша вердиктов Check по (хэш токена, объект, глагол): 1s–10s.
+    decisionCacheTTL: ""
   images:
     zot:
       repository: ghcr.io/project-zot/zot-linux-amd64
       tag: v2.1.20
       digest: sha256:95a837a0afacf5b7edc0c92493f04beee6891989b8d2fd50a00cf65a1e6d4fd5
-    # Образ svc-registry; запускается с --mode=sidecar.
-    sidecar:
-      repository: ""
+    iamProxy:
+      repository: docker.io/prorobotech/registry-iam-proxy
       tag: ""
       digest: ""
   edge:
@@ -78,7 +84,7 @@ site:
         name: ""
         namespace: ""
   network:
-    # true — разрешить вход kubelet (entity host) на :8080 для проб готовности.
+    # true — разрешить вход kubelet (entity host) на порт проб :8081.
     # Нужен там, где политика узла не пропускает пробы сама; по умолчанию закрыт.
     allowKubeletProbes: false
     dns:
@@ -87,8 +93,10 @@ site:
     # Пиры выхода: {fqdn, ports} | {namespace, labels, ports} | {cidr, ports}.
     # Выход в S3 выводится из storage.endpoint и здесь не задаётся.
     vault: []
-    # Порты kaname — только 9091 (Check) и 9097 (JWKS).
+    # Публичный API kaname (Check и JWKS); внутренний листенер :9091 запрещён.
     kaname: []
+    # Эндпоинт регистрации registry-operator.
+    registryOperator: []
   resources:
     zot:
       requests:
@@ -96,7 +104,7 @@ site:
         memory: 256Mi
       limits:
         memory: 1Gi
-    sidecar:
+    iamProxy:
       requests:
         cpu: 20m
         memory: 32Mi

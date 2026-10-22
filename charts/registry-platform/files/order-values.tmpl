@@ -3,6 +3,7 @@ instance:
   login: {{ .Variables.login | toJson }}
   registryUID: {{ .Variables.registryUID | toJson }}
   syncEpoch: {{ if regexMatch "^[0-9]{1,18}$" .Variables.syncEpoch }}{{ .Variables.syncEpoch }}{{ else }}{{ .Variables.syncEpoch | toJson }}{{ end }}
+  public: {{ if has .Variables.public (list "true" "false") }}{{ .Variables.public }}{{ else }}{{ .Variables.public | toJson }}{{ end }}
 storage:
   bucket: {{ .Variables.bucket | toJson }}
   endpoint: {{ .Variables.endpoint | toJson }}

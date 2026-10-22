@@ -3,8 +3,9 @@ name: registry-platform
 description: >-
   Platform objects of on-demand registries, installed once per cluster: the
   addons-operator template and value layers of the registry-instance chart,
-  the platform phase, the edge Gateway and the shared edge routes; and, off by
-  default, the admission policies and the per-tenant Argo CD projects.
+  the platform phase, the edge Gateway, the shared edge routes and the kaname
+  module manifest of registry; and, off by default, the admission policies and
+  the per-tenant Argo CD projects.
 type: application
 version: 1.0.0
 appVersion: "1.0.0"

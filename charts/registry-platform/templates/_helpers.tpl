@@ -24,7 +24,7 @@ argocdPlugins. Данные платформы исполняемого текс
 
 {{/* Переменные Addon заказа: их пишет registry-operator, их читает слой заказа. */}}
 {{- define "rp.orderVariables" -}}
-{{- list "id" "login" "registryUID" "syncEpoch" "bucket" "endpoint" "region" "vaultSecretPath" "vaultAuthMount" "vaultRole" | toJson -}}
+{{- list "id" "login" "registryUID" "syncEpoch" "public" "bucket" "endpoint" "region" "vaultSecretPath" "vaultAuthMount" "vaultRole" | toJson -}}
 {{- end -}}
 
 {{/*

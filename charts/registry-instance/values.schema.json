@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "registry-instance values",
-  "description": "Values of the zot workload of one on-demand registry. instance, storage and vault come from the order layer written by registry-operator; site comes from the platform site layer.",
+  "description": "Values of zot and its iam-proxy for one on-demand registry. instance, storage and vault come from the order layer written by registry-operator; site comes from the platform site layer.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -145,7 +145,7 @@
         }
       }
     },
-    "vaultPeer": {
+    "peer": {
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -247,109 +247,32 @@
       }
     },
     "kanamePeer": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "ports"
-      ],
-      "oneOf": [
+      "description": "A kaname peer of the public API (Check, JWKS); the internal listener :9091 is never reachable from the data plane.",
+      "allOf": [
         {
-          "required": [
-            "fqdn"
-          ],
-          "not": {
-            "anyOf": [
-              {
-                "required": [
-                  "namespace"
-                ]
-              },
-              {
-                "required": [
-                  "labels"
-                ]
-              },
-              {
-                "required": [
-                  "cidr"
-                ]
-              }
-            ]
-          }
+          "$ref": "#/definitions/peer"
         },
         {
-          "required": [
-            "namespace",
-            "labels"
-          ],
-          "not": {
-            "anyOf": [
-              {
-                "required": [
-                  "fqdn"
-                ]
-              },
-              {
-                "required": [
-                  "cidr"
-                ]
+          "properties": {
+            "ports": {
+              "items": {
+                "not": {
+                  "const": 9091
+                }
               }
-            ]
-          }
-        },
-        {
-          "required": [
-            "cidr"
-          ],
-          "not": {
-            "anyOf": [
-              {
-                "required": [
-                  "fqdn"
-                ]
-              },
-              {
-                "required": [
-                  "namespace"
-                ]
-              },
-              {
-                "required": [
-                  "labels"
-                ]
-              }
-            ]
+            }
           }
         }
-      ],
-      "properties": {
-        "fqdn": {
-          "$ref": "#/definitions/dnsName"
-        },
-        "namespace": {
-          "$ref": "#/definitions/dnsLabel"
-        },
-        "labels": {
-          "$ref": "#/definitions/narrowingLabels"
-        },
-        "cidr": {
-          "type": "string",
-          "pattern": "^(([0-9]{1,3}\\.){3}[0-9]{1,3}/([0-9]|[12][0-9]|3[0-2])|[0-9a-f:]+/([0-9]|[1-9][0-9]|1[01][0-9]|12[0-8]))$"
-        },
-        "ports": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 8,
-          "uniqueItems": true,
-          "items": {
-            "type": "integer",
-            "enum": [
-              9091,
-              9097
-            ]
-          }
-        }
-      }
+      ]
+    },
+    "audience": {
+      "type": "string",
+      "pattern": "^[a-z0-9]([a-z0-9.:/-]{0,126}[a-z0-9])?$"
+    },
+    "verdictTTL": {
+      "description": "Verdict cache window, 1s..10s.",
+      "type": "string",
+      "pattern": "^([1-9]|10)s$"
     }
   },
   "properties": {
@@ -364,7 +287,8 @@
         "id",
         "login",
         "registryUID",
-        "syncEpoch"
+        "syncEpoch",
+        "public"
       ],
       "properties": {
         "id": {
@@ -382,6 +306,10 @@
         "syncEpoch": {
           "type": "integer",
           "minimum": 0
+        },
+        "public": {
+          "type": "boolean",
+          "description": "Registry.spec.public: anonymous pull when true."
         }
       }
     },
@@ -435,74 +363,47 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
+        "caBundle",
         "vault",
         "kaname",
-        "sidecar",
+        "registryOperator",
+        "iamProxy",
         "images",
         "edge",
         "network",
         "resources"
       ],
       "properties": {
+        "caBundle": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "configMap",
+            "key"
+          ],
+          "properties": {
+            "configMap": {
+              "$ref": "#/definitions/dnsLabel"
+            },
+            "key": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._-]{1,253}$"
+            }
+          }
+        },
         "vault": {
           "type": "object",
           "additionalProperties": false,
           "required": [
             "address",
-            "caConfigMap",
-            "tokenAudience",
-            "pki"
+            "tokenAudience"
           ],
           "properties": {
             "address": {
               "$ref": "#/definitions/httpsOrigin"
             },
-            "caConfigMap": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "name",
-                "key"
-              ],
-              "properties": {
-                "name": {
-                  "$ref": "#/definitions/dnsLabel"
-                },
-                "key": {
-                  "type": "string",
-                  "pattern": "^[A-Za-z0-9._-]{1,253}$"
-                }
-              }
-            },
             "tokenAudience": {
-              "type": "string",
-              "pattern": "^[a-z0-9]([a-z0-9.:/-]{0,126}[a-z0-9])?$"
-            },
-            "pki": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "mount",
-                "role",
-                "commonName",
-                "uriSAN"
-              ],
-              "properties": {
-                "mount": {
-                  "$ref": "#/definitions/vaultMount"
-                },
-                "role": {
-                  "$ref": "#/definitions/dnsLabel"
-                },
-                "commonName": {
-                  "$ref": "#/definitions/dnsName"
-                },
-                "uriSAN": {
-                  "type": "string",
-                  "maxLength": 512,
-                  "pattern": "^spiffe://[a-z0-9.-]+(/[A-Za-z0-9._-]+)+$"
-                }
-              }
+              "$ref": "#/definitions/audience"
             }
           }
         },
@@ -510,38 +411,52 @@
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "checkAddress",
-            "jwksURL"
-          ],
-          "properties": {
-            "checkAddress": {
-              "description": "host:9091 of the kaname internal listener.",
-              "type": "string",
-              "maxLength": 260,
-              "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?:9091$"
-            },
-            "jwksURL": {
-              "allOf": [
-                {
-                  "$ref": "#/definitions/httpsURL"
-                },
-                {
-                  "pattern": "^https://[^/:]+:9097/"
-                }
-              ]
-            }
-          }
-        },
-        "sidecar": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
+            "apiURL",
+            "jwksURL",
+            "issuer",
             "audience"
           ],
           "properties": {
+            "apiURL": {
+              "description": "Public kaname API (AuthorizeService.Check).",
+              "$ref": "#/definitions/httpsURL"
+            },
+            "jwksURL": {
+              "$ref": "#/definitions/httpsURL"
+            },
+            "issuer": {
+              "$ref": "#/definitions/httpsURL"
+            },
             "audience": {
-              "type": "string",
-              "pattern": "^[a-z0-9]([a-z0-9.:/-]{0,126}[a-z0-9])?$"
+              "$ref": "#/definitions/audience"
+            }
+          }
+        },
+        "registryOperator": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "registrationURL",
+            "tokenAudience"
+          ],
+          "properties": {
+            "registrationURL": {
+              "$ref": "#/definitions/httpsURL"
+            },
+            "tokenAudience": {
+              "$ref": "#/definitions/audience"
+            }
+          }
+        },
+        "iamProxy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "decisionCacheTTL"
+          ],
+          "properties": {
+            "decisionCacheTTL": {
+              "$ref": "#/definitions/verdictTTL"
             }
           }
         },
@@ -550,13 +465,13 @@
           "additionalProperties": false,
           "required": [
             "zot",
-            "sidecar"
+            "iamProxy"
           ],
           "properties": {
             "zot": {
               "$ref": "#/definitions/image"
             },
-            "sidecar": {
+            "iamProxy": {
               "$ref": "#/definitions/image"
             }
           }
@@ -606,7 +521,8 @@
             "allowKubeletProbes",
             "dns",
             "vault",
-            "kaname"
+            "kaname",
+            "registryOperator"
           ],
           "properties": {
             "allowKubeletProbes": {
@@ -633,7 +549,7 @@
               "minItems": 1,
               "maxItems": 8,
               "items": {
-                "$ref": "#/definitions/vaultPeer"
+                "$ref": "#/definitions/peer"
               }
             },
             "kaname": {
@@ -643,6 +559,14 @@
               "items": {
                 "$ref": "#/definitions/kanamePeer"
               }
+            },
+            "registryOperator": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 8,
+              "items": {
+                "$ref": "#/definitions/peer"
+              }
             }
           }
         },
@@ -651,7 +575,7 @@
           "additionalProperties": false,
           "required": [
             "zot",
-            "sidecar",
+            "iamProxy",
             "vaultAgent",
             "scratchSizeLimit"
           ],
@@ -659,7 +583,7 @@
             "zot": {
               "$ref": "#/definitions/resources"
             },
-            "sidecar": {
+            "iamProxy": {
               "$ref": "#/definitions/resources"
             },
             "vaultAgent": {
