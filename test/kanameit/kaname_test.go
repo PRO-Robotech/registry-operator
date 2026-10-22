@@ -651,14 +651,19 @@ func (p *proxy) settled(t *testing.T, s subject, path string) {
 
 // Таблица прав одна для обычного токена служебной учётки и человека, обеими
 // схемами предъявления: нет выдачи, puller и pusher на регистри, pusher
-// точечно на репозиторий (F3: записанный пустой репозиторий правом на
-// другой не открывается, нового не завести), pusher на аккаунт (каскад),
+// точечно на репозиторий (соседний репозиторий того же регистри закрыт на
+// чтение и запись; F3: записанный пустой репозиторий правом на другой не
+// открывается, нового не завести), pusher на аккаунт (каскад),
 // чужой регистри — 403.
 func TestKaname_RightsTableWithTheOrdinaryToken(t *testing.T) {
 	w := newWorld(t)
 	pull := func(reg string) string { return "/v2/" + reg + "/team/app/manifests/latest" }
 	push := func(reg string) string { return "/v2/" + reg + "/team/app/manifests/v1" }
 	empty := "/v2/" + w.reg + "/team/empty/blobs/uploads/"
+	// Соседний репозиторий того же регистри — записанный team/empty: выдача
+	// на team/app его не открывает ни на чтение, ни на запись.
+	neighbourPull := "/v2/" + w.reg + "/team/empty/manifests/latest"
+	neighbourPush := "/v2/" + w.reg + "/team/empty/manifests/v1"
 	n := 0
 	fresh := func() string { n++; return fmt.Sprintf("/v2/%s/fresh-%d/blobs/uploads/", w.reg, n) }
 
@@ -703,6 +708,8 @@ func TestKaname_RightsTableWithTheOrdinaryToken(t *testing.T) {
 					step{"pusher on the repository: pull", http.MethodGet, pull(w.reg), 200},
 					step{"pusher on the repository: push", http.MethodPut, push(w.reg), 200})
 				p.expect(t, s, false,
+					step{"pusher on the repository: pull from the neighbouring repository", http.MethodGet, neighbourPull, 403},
+					step{"pusher on the repository: push to the neighbouring repository", http.MethodPut, neighbourPush, 403},
 					step{"F3: the registered empty repository", http.MethodPost, empty, 403},
 					step{"pusher on the repository: new repository", http.MethodPost, fresh(), 403})
 			})
