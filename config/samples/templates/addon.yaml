@@ -1,0 +1,51 @@
+# Addon заказа отвечает на один вопрос — поставить zot с нужными путями: бакет,
+# endpoint, лист Vault и роль Vault берутся из статусов готовых шагов.
+apiVersion: observed.registry.in-cloud.io/v1alpha1
+kind: ObservedAddonTemplate
+metadata:
+  name: zot-addon-v1
+spec:
+  templateName: zot-addon
+  version: v1
+  chart:
+    repoURL: oci://ghcr.io/pro-robotech/charts
+    name: registry-instance
+    version: 1.0.0
+    digest: sha256:acf4e9b3f3cace43e81cb7eae9c52553217f30b4578fd812ef55657286390304
+  value: |
+    targetCluster: in-cluster
+    pluginName: helm-with-values
+    backend:
+      type: argocd
+      namespace: {{ .Params.addon.argocdNamespace | toJson }}
+      project: {{ printf "%s%s" .Params.addon.projectPrefix .Login | toJson }}
+      finalizer: true
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions: [ServerSideApply=true, FailOnSharedResource=true]
+        retry:
+          limit: 10
+          backoff:
+            duration: 10s
+            factor: 2
+            maxDuration: 5m
+    valuesSelectors:
+    - name: site
+      priority: 10
+      matchLabels:
+        addons.in-cloud.io/addon: {{ .Params.addon.valuesAddon | toJson }}
+        addons.in-cloud.io/values: site
+    - name: order
+      priority: 20
+      matchLabels:
+        addons.in-cloud.io/addon: {{ .Params.addon.valuesAddon | toJson }}
+        addons.in-cloud.io/values: order
+    variables:
+      bucket: {{ .Status.S3BucketClaim.Status.bucketName | toJson }}
+      endpoint: {{ .Status.S3BucketClaim.Status.endpoint | toJson }}
+      region: {{ .Params.storage.region | toJson }}
+      vaultSecretPath: {{ printf "%s/data/%s/namespaces/%s/apps/docker-registry/zot-%s" .Params.secrets.kvMount .Params.secrets.secretsPrefix .Login .ID | toJson }}
+      vaultAuthMount: {{ .Status.VaultClaim.Status.vault.authMountPath | toJson }}
+      vaultRole: {{ .Status.VaultClaim.Name | toJson }}

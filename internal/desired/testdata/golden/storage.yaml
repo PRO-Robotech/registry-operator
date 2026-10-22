@@ -1,0 +1,25 @@
+apiVersion: vault.in-cloud.io/v1alpha1
+kind: S3BucketClaim
+metadata:
+  name: zot-abc123
+  namespace: cust01
+  labels:
+    app.kubernetes.io/managed-by: registry-operator
+    registry.in-cloud.io/id: abc123
+    registry.in-cloud.io/namespace: cust01
+    registry.in-cloud.io/owner-uid: 6f1c2a3b-4d5e-4f60-8a71-92b3c4d5e6f7
+    registry.in-cloud.io/template: zot-v1
+    registry.in-cloud.io/step: storage
+spec:
+  vaultConfigRef:
+    name: s3-bucket
+  clusterRef:
+    name: zot-abc123
+  customerLogin: cust01
+  bucket:
+    managedBy: SYSTEM
+    public: false
+  vault:
+    secretsPrefix: clusters/site-a
+    destinationPath: namespaces/cust01/apps/docker-registry/zot-abc123
+  deletionPolicy: Retain

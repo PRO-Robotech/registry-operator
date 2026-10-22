@@ -1,0 +1,41 @@
+{{- /*
+Вход в поды оператора. Эндпоинт заявок — только от подов zot регистри (метки
+ставит чарт registry-instance) из namespace арендаторов: поток к нему от
+любого другого пода кластера не доходит до учёта проверок токенов. Метрики —
+от networkPolicy.metricsFrom (пусто — от любого пода: сервер метрик отдаёт
+только чтение). Пробы здоровья — ответ «жив/готов» без данных.
+*/ -}}
+{{- $np := .Values.networkPolicy -}}
+{{- if not $np.zotPodLabels -}}
+{{- fail "networkPolicy.zotPodLabels is required: the enrollment endpoint admits only zot pods" -}}
+{{- end -}}
+{{- if not $np.tenantNamespaceSelector -}}
+{{- fail "networkPolicy.tenantNamespaceSelector is required: zot pods live in tenant namespaces" -}}
+{{- end -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "ro.name" . }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "ro.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "ro.selector" . | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+  - ports:
+    - port: enrollment
+      protocol: TCP
+    from:
+    - namespaceSelector: {{- toYaml $np.tenantNamespaceSelector | nindent 8 }}
+      podSelector:
+        matchLabels: {{- toYaml $np.zotPodLabels | nindent 10 }}
+  - ports:
+    - port: metrics
+      protocol: TCP
+    {{- with $np.metricsFrom }}
+    from: {{- toYaml . | nindent 4 }}
+    {{- end }}
+  - ports:
+    - port: probes
+      protocol: TCP

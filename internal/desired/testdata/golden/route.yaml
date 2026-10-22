@@ -1,0 +1,31 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: zot-abc123
+  namespace: registry-edge
+  labels:
+    app.kubernetes.io/managed-by: registry-operator
+    registry.in-cloud.io/id: abc123
+    registry.in-cloud.io/namespace: cust01
+    registry.in-cloud.io/owner-uid: 6f1c2a3b-4d5e-4f60-8a71-92b3c4d5e6f7
+    registry.in-cloud.io/template: zot-v1
+    registry.in-cloud.io/step: route
+spec:
+  parentRefs:
+  - group: gateway.networking.k8s.io
+    kind: Gateway
+    namespace: registry-edge
+    name: registry-gw
+    sectionName: https
+  hostnames:
+  - registry.example.test
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /v2/abc123/
+    backendRefs:
+    - kind: Service
+      name: zot-abc123
+      namespace: cust01
+      port: 8080

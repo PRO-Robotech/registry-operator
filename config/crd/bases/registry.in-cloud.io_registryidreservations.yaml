@@ -1,0 +1,222 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.23.0
+  name: registryidreservations.registry.in-cloud.io
+spec:
+  group: registry.in-cloud.io
+  names:
+    categories:
+    - registry
+    kind: RegistryIDReservation
+    listKind: RegistryIDReservationList
+    plural: registryidreservations
+    shortNames:
+    - regid
+    singular: registryidreservation
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.registryRef.namespace
+      name: Namespace
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          RegistryIDReservation — резерв id регистри: создаётся атомарным CREATE
+          (занятое имя — отказ), переживает заказ надгробием Released.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: RegistryIDReservationSpec — закрепление id за заказом.
+            properties:
+              registryRef:
+                description: RegistryRef — заказ, за которым закреплён id.
+                properties:
+                  name:
+                    maxLength: 63
+                    minLength: 1
+                    type: string
+                  namespace:
+                    maxLength: 63
+                    minLength: 1
+                    type: string
+                  uid:
+                    maxLength: 64
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                - namespace
+                - uid
+                type: object
+            required:
+            - registryRef
+            type: object
+            x-kubernetes-validations:
+            - message: reservation spec is immutable
+              rule: self == oldSelf
+          status:
+            description: RegistryIDReservationStatus — состояние резерва.
+            properties:
+              diagnostics:
+                description: |-
+                  Diagnostics — сырые сообщения рендера, политики и дочерних ресурсов.
+                  Объект уровня Cluster: арендатору и BFF не виден.
+                properties:
+                  message:
+                    description: Message — последняя ошибка прохода (рендер, политика,
+                      запись).
+                    maxLength: 2048
+                    type: string
+                  resources:
+                    items:
+                      description: ResourceDiagnostic — сырое сообщение о ресурсе
+                        шага (внутренняя проекция).
+                      properties:
+                        kind:
+                          type: string
+                        message:
+                          maxLength: 1024
+                          type: string
+                        name:
+                          type: string
+                        namespace:
+                          type: string
+                        step:
+                          description: 'Step — шаг пайплайна заказа: один ресурс со
+                            своим состоянием.'
+                          enum:
+                          - storage
+                          - identity
+                          - secrets
+                          - registration
+                          - access
+                          - workload
+                          - route
+                          type: string
+                      required:
+                      - kind
+                      - name
+                      - step
+                      type: object
+                    maxItems: 16
+                    type: array
+                    x-kubernetes-list-type: atomic
+                type: object
+              phase:
+                description: ReservationPhase — состояние резерва.
+                enum:
+                - Active
+                - Released
+                type: string
+              registration:
+                description: Registration — регистрация ресурса регистри в IAM.
+                properties:
+                  account:
+                    description: Account — аккаунт IAM проекта (acc…); пусто — аккаунт
+                      выводит IAM.
+                    maxLength: 64
+                    type: string
+                  closingAt:
+                    description: |-
+                      ClosingAt — когда снятие начато. С этого момента заявки на новые
+                      репозитории отвергаются, а снятие репозиториев ждёт, пока истечёт
+                      срок уже идущей заявки: ни одна из них не допишет запись в IAM после
+                      снятия.
+                    format: date-time
+                    type: string
+                  generation:
+                    description: |-
+                      Generation — поколение заказа, с которым регистрация применена
+                      последней.
+                    format: int64
+                    type: integer
+                  project:
+                    description: Project — проект IAM регистри (prj…).
+                    maxLength: 64
+                    minLength: 1
+                    type: string
+                  registeredAt:
+                    description: RegisteredAt — когда регистрация применена последней.
+                    format: date-time
+                    type: string
+                required:
+                - project
+                type: object
+              releasedAt:
+                format: date-time
+                type: string
+              repositories:
+                description: Repositories — опись репозиториев регистри в IAM.
+                items:
+                  description: |-
+                    RegisteredRepository — репозиторий регистри, записанный в IAM по заявке
+                    рабочей нагрузки zot. Опись — источник истины для снятия: удаление заказа
+                    снимает в IAM ровно то, что здесь записано.
+                  properties:
+                    enrolledAt:
+                      description: EnrolledAt — когда заявка записана в опись.
+                      format: date-time
+                      type: string
+                    enrolledBy:
+                      description: |-
+                        EnrolledBy — субъект IAM, чей push завёл репозиторий
+                        (user:<id> | service_account:<id>).
+                      maxLength: 160
+                      type: string
+                    name:
+                      description: Name — имя репозитория внутри регистри (без <id>/).
+                      maxLength: 128
+                      minLength: 1
+                      type: string
+                    registered:
+                      description: |-
+                        Registered — регистрация в IAM применена; false — заявка в описи,
+                        регистрация ещё не подтверждена.
+                      type: boolean
+                  required:
+                  - enrolledAt
+                  - name
+                  type: object
+                maxItems: 1024
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+            type: object
+        required:
+        - spec
+        type: object
+        x-kubernetes-validations:
+        - message: reservation name must equal the registry id
+          rule: self.metadata.name == self.spec.registryRef.name
+    served: true
+    storage: true
+    subresources:
+      status: {}

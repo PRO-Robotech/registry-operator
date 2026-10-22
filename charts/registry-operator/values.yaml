@@ -1,0 +1,77 @@
+# Образ оператора: тег и digest задаёт посадка; без digest — отказ рендера.
+image:
+  repository: prorobotech/registry-operator
+  tag: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+
+replicas: 2
+leaderElect: true
+maxConcurrentReconciles: 4
+
+serviceAccount:
+  name: registry-operator
+
+# Конфигурация оператора (config.yaml): политика площадки, сверка чарта,
+# kaname, эндпоинт заявок, темп. Пути файлов kaname и эндпоинта ставит чарт
+# (секреты сертификатов ниже) — здесь их не задают. Пусто — отказ рендера.
+config: {}
+
+# Лист службы registry для внутреннего листенера kaname (:9091). SAN —
+# spiffe://<trustDomain>/ns/<namespace релиза>/sa/kacho-<moduleName>.
+kaname:
+  moduleName: registry
+  trustDomain: cluster.local
+  certificate:
+    # true — Certificate cert-manager от issuerRef (центр, которому доверяет
+    # kaname); false — секрет secretName ставит платформа.
+    create: true
+    secretName: registry-operator-kaname-client
+    issuerRef:
+      name: ""
+      kind: ClusterIssuer
+      group: cert-manager.io
+    duration: 2160h
+    renewBefore: 360h
+
+# Эндпоинт заявок рабочей нагрузки zot на репозитории (TLS).
+enrollment:
+  port: 8443
+  certificate:
+    create: true
+    secretName: registry-operator-enrollment-tls
+    issuerRef:
+      name: ""
+      kind: ClusterIssuer
+      group: cert-manager.io
+    duration: 2160h
+    renewBefore: 360h
+
+metrics:
+  port: 8080
+
+# Политика сети подов оператора (templates/networkpolicy.yaml): вход на
+# эндпоинт заявок — только от подов zot из namespace арендаторов.
+networkPolicy:
+  # Метки подов zot (чарт registry-instance).
+  zotPodLabels:
+    app.kubernetes.io/name: zot
+    app.kubernetes.io/part-of: registry
+  # namespace арендаторов: метку проекта ставит платформа.
+  tenantNamespaceSelector:
+    matchExpressions:
+    - key: kaname.in-cloud.io/project-id
+      operator: Exists
+  # Источники метрик (элементы from NetworkPolicy); пусто — любой под.
+  metricsFrom: []
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

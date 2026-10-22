@@ -1,0 +1,46 @@
+{{- $k := .Values.kaname.certificate }}
+{{- if $k.create }}
+{{- if not $k.issuerRef.name }}{{ fail "kaname.certificate.issuerRef.name is required: the CA kaname trusts" }}{{ end }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "ro.name" . }}-kaname-client
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "ro.labels" . | nindent 4 }}
+spec:
+  secretName: {{ $k.secretName }}
+  duration: {{ $k.duration }}
+  renewBefore: {{ $k.renewBefore }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  usages: [client auth, digital signature]
+  uris:
+  - {{ printf "spiffe://%s/ns/%s/sa/kacho-%s" .Values.kaname.trustDomain .Release.Namespace .Values.kaname.moduleName }}
+  issuerRef: {{- toYaml $k.issuerRef | nindent 4 }}
+{{- end }}
+{{- $e := .Values.enrollment.certificate }}
+{{- if $e.create }}
+{{- if not $e.issuerRef.name }}{{ fail "enrollment.certificate.issuerRef.name is required" }}{{ end }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "ro.name" . }}-enrollment
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "ro.labels" . | nindent 4 }}
+spec:
+  secretName: {{ $e.secretName }}
+  duration: {{ $e.duration }}
+  renewBefore: {{ $e.renewBefore }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  usages: [server auth, digital signature]
+  dnsNames:
+  - {{ printf "%s.%s.svc" (include "ro.name" .) .Release.Namespace }}
+  - {{ printf "%s.%s.svc.cluster.local" (include "ro.name" .) .Release.Namespace }}
+  issuerRef: {{- toYaml $e.issuerRef | nindent 4 }}
+{{- end }}

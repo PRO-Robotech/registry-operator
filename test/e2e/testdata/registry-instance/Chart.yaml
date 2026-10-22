@@ -1,0 +1,5 @@
+apiVersion: v2
+name: registry-instance
+description: Stand chart of the e2e probe; only its OCI digest is verified, it is never installed.
+type: application
+version: 1.0.0

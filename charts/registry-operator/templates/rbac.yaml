@@ -1,0 +1,51 @@
+{{- /* ClusterRole — сгенерированная из маркеров (make manifests): запись
+только шести ведомых видов и своих объектов, прочее — чтение. */}}
+{{- $role := .Files.Get "files/role.yaml" | fromYaml }}
+{{- if not $role.rules }}{{ fail "files/role.yaml has no rules: run make manifests" }}{{ end }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "ro.name" . }}
+  labels: {{- include "ro.labels" . | nindent 4 }}
+rules: {{- toYaml $role.rules | nindent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "ro.name" . }}
+  labels: {{- include "ro.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "ro.name" . }}
+subjects:
+- kind: ServiceAccount
+  name: {{ .Values.serviceAccount.name }}
+  namespace: {{ .Release.Namespace }}
+---
+{{- /* Выборы лидера — только в namespace релиза. */}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "ro.name" . }}-leader-election
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "ro.labels" . | nindent 4 }}
+rules:
+- apiGroups: [coordination.k8s.io]
+  resources: [leases]
+  verbs: [get, list, watch, create, update, patch, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "ro.name" . }}-leader-election
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "ro.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "ro.name" . }}-leader-election
+subjects:
+- kind: ServiceAccount
+  name: {{ .Values.serviceAccount.name }}
+  namespace: {{ .Release.Namespace }}

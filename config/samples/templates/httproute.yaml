@@ -1,0 +1,28 @@
+# Маршрут заказа на общем Gateway площадки: /v2/<id>/ → Service zot-<id>.
+apiVersion: observed.registry.in-cloud.io/v1alpha1
+kind: ObservedHTTPRouteTemplate
+metadata:
+  name: zot-route-v1
+spec:
+  templateName: zot-route
+  version: v1
+  targetNamespace: registry-edge
+  value: |
+    parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      namespace: {{ .Params.route.gatewayNamespace | toJson }}
+      name: {{ .Params.route.gatewayName | toJson }}
+      sectionName: {{ .Params.route.sectionName | toJson }}
+    hostnames:
+    - {{ .Params.route.host | toJson }}
+    rules:
+    - matches:
+      - path:
+          type: PathPrefix
+          value: {{ printf "/v2/%s/" .ID | toJson }}
+      backendRefs:
+      - kind: Service
+        name: {{ printf "zot-%s" .ID | toJson }}
+        namespace: {{ .Login | toJson }}
+        port: {{ .Params.route.backendPort | toJson }}

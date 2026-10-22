@@ -1,0 +1,94 @@
+# Значения проб чарта: конфигурация примера (config/samples), образ-заглушка.
+image:
+  tag: ci
+  digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+config:
+  policy:
+    resourceNamePrefix: zot-
+    addonNamePrefix: reg-
+    storage:
+      vaultConfig: s3-bucket
+      secretsPrefix: clusters/site-a
+      destinationPath: namespaces/{login}/apps/docker-registry/{name}
+    secrets:
+      vaultConfig: default
+      secretsPrefix: clusters/site-a
+      authMount: kubernetes-site-a
+      kvMount: secret
+      audience: vault
+    identity:
+      allowedRoles:
+      - registry.pusher
+      - registry.puller
+      targetType: registry.registries
+      keyDeliveryApp: docker-registry
+      maxKeyTTLSeconds: 7776000
+    route:
+      namespaces:
+      - registry-edge
+      hostnames:
+      - registry.example.test
+      parentRefs:
+      - namespace: registry-edge
+        name: registry-gw
+        sectionName: https
+      backendPort: 8080
+    addon:
+      argocdNamespace: argocd
+      targetCluster: in-cluster
+      project:
+        mode: Tenant
+        prefix: registry-
+      charts:
+      - repoURL: oci://ghcr.io/pro-robotech/charts
+        name: registry-instance
+        version: 1.0.0
+        digest: sha256:acf4e9b3f3cace43e81cb7eae9c52553217f30b4578fd812ef55657286390304
+      pluginNames:
+      - helm-with-values
+      syncOptions:
+        allowed:
+        - ServerSideApply=true
+        - FailOnSharedResource=true
+        - ApplyOutOfSyncOnly=true
+        required:
+        - FailOnSharedResource=true
+      maxRetryLimit: 10
+      valuesAddonPrefix: registry-platform
+      templateVariables:
+      - bucket
+      - endpoint
+      - region
+      - vaultSecretPath
+      - vaultAuthMount
+      - vaultRole
+  chartVerification:
+    timeout: 10s
+    cacheTTL: 10m
+  kaname:
+    address: kaname-internal.iam-system.svc:9091
+    serverName: kaname-internal.iam-system.svc
+    timeout: 5s
+  enrollment:
+    audience: registry-operator
+    maxRepositories: 256
+    ratePerMinute: 30
+    burst: 10
+    enrollerGrace: 10m
+    requestTimeout: 15s
+  intervals:
+    notReady: 15s
+    ready: 10m
+    refused: 10m
+    deletionTimeout: 30m
+  syncRecovery:
+    initialDelay: 1m
+    maxDelay: 30m
+kaname:
+  certificate:
+    issuerRef:
+      name: platform-ca
+enrollment:
+  certificate:
+    issuerRef:
+      name: platform-ca

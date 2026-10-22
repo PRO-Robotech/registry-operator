@@ -1,0 +1,291 @@
+# Таблица инъекций (hack/inject.py): дефект в прод-коде → проба, которая
+# обязана на нём покраснеть; контроль — та же проба на неправленом дереве.
+injections:
+  - name: vault-claim-moved-to-stage-two
+    file: internal/kinds/kinds.go
+    old: "{S3BucketClaim, VaultClaim, IamServiceAccount},\n\t{IamAccessBinding, Addon},"
+    new: "{S3BucketClaim, IamServiceAccount},\n\t{VaultClaim, IamAccessBinding, Addon},"
+    package: ./internal/kinds/
+    tests: [TestStages_FirstStageIsTheParallelSetOfTheFinalForm]
+  - name: registration-removed-after-the-account
+    file: internal/kinds/kinds.go
+    old: "\t{Registration: true},\n\t{Kind: IamServiceAccount},"
+    new: "\t{Kind: IamServiceAccount},\n\t{Registration: true},"
+    package: ./internal/kinds/
+    tests: [TestDeletionOrder_IsThePipelineReversed]
+  - name: empty-parent-chain-sent
+    file: internal/kaname/kaname.go
+    old: "if len(r.ParentChain) == 0 {"
+    new: "if false {"
+    package: ./internal/kaname/
+    tests: [TestRegister_EmptyParentChainIsNeverSent]
+  - name: permission-denied-read-as-unavailable
+    file: internal/kaname/client.go
+    old: "case codes.InvalidArgument, codes.PermissionDenied,"
+    new: "case codes.InvalidArgument,"
+    package: ./internal/kaname/
+    tests: [TestRegister_RefusalAndUnavailabilityAreTwoOutcomes, TestRegister_LeafOfAnotherServiceIsRefused]
+  - name: enrollment-by-any-account-of-the-tenant
+    file: internal/enroll/server.go
+    old: "if !kaname.ValidID(id) || sa != s.WorkloadName(id) {"
+    new: "if !kaname.ValidID(id) || sa == \"\" {"
+    package: ./internal/enroll/
+    tests: [TestEnroll_OnlyTheWorkloadAccountOfThisRegistryMayEnroll]
+  - name: enrollment-without-a-limit
+    file: internal/enroll/server.go
+    old: "if len(res.Status.Repositories) >= s.Limits.MaxRepositories {"
+    new: "if false {"
+    package: ./internal/enroll/
+    tests: [TestEnroll_RepositoryLimitAndRate]
+  - name: registered-repository-opened-for-any-subject
+    file: internal/enroll/server.go
+    old: "if r.EnrolledBy == body.Subject && now.Sub(r.EnrolledAt.Time) < s.Limits.EnrollerGrace {"
+    new: "if true {"
+    package: ./internal/enroll/
+    tests: [TestEnroll_RegisteredRepositoryIsNotNewForAnotherSubject]
+  - name: write-verdicts-cached
+    file: internal/iamproxy/authz.go
+    old: "return verb == VerbGet || verb == VerbList }"
+    new: "return verb != \"\" }"
+    package: ./internal/iamproxy/
+    tests: [TestProxy_RevocationAfterTheCacheTTL]
+  - name: public-registry-accepts-anonymous-push
+    file: internal/iamproxy/proxy.go
+    old: "if read && p.o.Public {"
+    new: "if (read || p.o.Public) && p.o.Public {"
+    package: ./internal/iamproxy/
+    tests: [TestProxy_AnonymousAccess]
+  - name: client-credentials-forwarded-to-zot
+    file: internal/iamproxy/proxy.go
+    old: "[]string{\"Authorization\", \"Cookie\", \"Proxy-Authorization\", \"Forwarded\","
+    new: "[]string{\"Forwarded\","
+    package: ./internal/iamproxy/
+    tests: [TestProxy_Hygiene]
+  - name: zot-failure-bodies-forwarded
+    file: internal/iamproxy/proxy.go
+    old: "if resp.StatusCode < 500 && resp.StatusCode != http.StatusUnauthorized {"
+    new: "if true {"
+    package: ./internal/iamproxy/
+    tests: [TestProxy_Hygiene]
+  - name: new-repository-without-the-create-right
+    file: internal/iamproxy/proxy.go
+    old: "if v := p.check(ctx, id, VerbUpdate, kaname.RegistryObject(p.o.RegistryID)); v != allow {"
+    new: "if v := allow; v != allow {"
+    package: ./internal/iamproxy/
+    tests: [TestProxy_RightsTable]
+  - name: token-without-expiry-accepted
+    file: internal/iamproxy/token.go
+    old: "\t\tjwt.WithExpirationRequired(),\n"
+    new: ""
+    package: ./internal/iamproxy/
+    tests: [TestProxy_RefusesInvalidTokens]
+  - name: vault-policy-reads-any-leaf
+    file: internal/policy/validate.go
+    old: "if ip.Path != leaf {"
+    new: "if ip.Path == \"\" {"
+    package: ./internal/desired/
+    tests: [TestBuild_RefusesARenderedSpecThatOverstepsThePolicy]
+  - name: foreign-reservation-adopted
+    file: internal/controller/registry_controller.go
+    old: "if res.Spec.RegistryRef.UID != string(reg.UID) || res.Status.Phase == registryv1alpha1.ReservationReleased {"
+    new: "if res.Status.Phase == registryv1alpha1.ReservationReleased {"
+    package: ./internal/controller/
+    tests: [TestPipeline_ReservationOfAnotherOrderIsRefused]
+  - name: stage-two-opened-before-the-registration
+    file: internal/controller/registry_controller.go
+    old: "stageReady = stageReady && ready"
+    new: "stageReady = stageReady || ready"
+    package: ./internal/controller/
+    tests: [TestPipeline_RegistrationGatesStageTwo]
+  - name: project-relabel-moves-the-registry
+    file: internal/controller/registration.go
+    old: "if labeled.Project != rec.Project {"
+    new: "if false {"
+    package: ./internal/controller/
+    tests: [TestPipeline_ProjectComesFromTheNamespaceAndIsPinned]
+  - name: escaped-path-proxied
+    file: internal/iamproxy/route.go
+    old: "if r.URL.RawPath != \"\" {"
+    new: "if false {"
+    package: ./internal/iamproxy/
+    tests: [TestParse_EscapedPathIsNotProxied]
+  - name: unconfirmed-repository-holds-the-registry
+    file: internal/controller/registration.go
+    old: "\tp.registration = &registryv1alpha1.RegistrationStatus{Object: obj, Ready: true, Reason: registryv1alpha1.ReasonRegistered}\n\tmetrics.Registrations"
+    new: "\tif !allRepositoriesRegistered(p.reservation) {\n\t\treturn false, nil\n\t}\n\tp.registration = &registryv1alpha1.RegistrationStatus{Object: obj, Ready: true, Reason: registryv1alpha1.ReasonRegistered}\n\tmetrics.Registrations"
+    package: ./internal/controller/
+    tests: [TestPipeline_UnconfirmedRepositoryDoesNotHoldTheRegistry]
+  - name: rbac-writes-secrets
+    file: charts/registry-operator/files/role.yaml
+    old: "  resources:\n  - namespaces\n  verbs:\n  - get\n"
+    new: "  resources:\n  - namespaces\n  - secrets\n  verbs:\n  - create\n  - get\n"
+    package: ./internal/kinds/
+    tests: [TestClusterRole_WritesOnlyTheSixKinds]
+  - name: denials-cached
+    file: internal/iamproxy/authz.go
+    old: "if err != nil || !allowed {"
+    new: "if err != nil {"
+    package: ./internal/iamproxy/
+    tests: [TestCachedChecker_KeyIsTheTokenAndWritesBypass, TestProxy_PushOfANewRepositoryStartsWithBlobChecks]
+  - name: system-class-granted
+    file: internal/policy/validate.go
+    old: "\t\tcase sub.SystemClass != nil:\n"
+    new: "\t\tcase sub.SystemClass != nil && false:\n"
+    package: ./internal/policy/
+    tests: [TestValidate_SystemClassIsNeverGranted]
+  - name: token-checks-accounted-for-all-sources-at-once
+    file: internal/enroll/server.go
+    old: "if !s.sources.allow(sourceOf(req)) {"
+    new: "if !s.sources.allow(\"every-source\") {"
+    package: ./internal/enroll/
+    tests: [TestEnroll_UnauthenticatedFloodFromOneSourceDoesNotStarveOthers]
+  - name: new-repository-rate-ignored
+    file: internal/enroll/server.go
+    old: "if !withinRate(res.Status.Repositories, now, s.Limits.RatePerMinute, s.Limits.Burst) {"
+    new: "if false {"
+    package: ./internal/enroll/
+    tests: [TestEnroll_RepositoryLimitAndRate, TestEnroll_RateIsHeldAcrossReplicas]
+  - name: compensation-tried-once
+    file: internal/enroll/server.go
+    old: "\t\t\tcase <-t.C:\n\t\t\t}"
+    new: "\t\t\tcase <-t.C:\n\t\t\t\treturn\n\t\t\t}"
+    package: ./internal/enroll/
+    tests: [TestEnroll_CompensationIsRetriedUntilIAMAnswers]
+  - name: compensation-dropped
+    file: internal/enroll/server.go
+    old: "\t\ts.compensate(ctx, repo)\n"
+    new: ""
+    package: ./internal/enroll/
+    tests: [TestEnroll_CompensationIsRetriedUntilIAMAnswers, TestEnroll_ClosingDuringTheWriteIsCompensated]
+  - name: concurrent-enrollments-of-one-repository-not-deduplicated
+    file: internal/enroll/server.go
+    old: "\t\t\tif r.Name != body.Repository {\n\t\t\t\tcontinue\n\t\t\t}\n\t\t\tentry = r"
+    new: "\t\t\tif true {\n\t\t\t\tcontinue\n\t\t\t}\n\t\t\tentry = r"
+    package: ./internal/enroll/
+    tests: [TestEnroll_ConcurrentEnrollmentsOfOneNewRepository]
+  - name: concurrent-enrollments-past-the-limit
+    file: internal/enroll/server.go
+    old: "if len(res.Status.Repositories) >= s.Limits.MaxRepositories {"
+    new: "if len(res.Status.Repositories) > s.Limits.MaxRepositories {"
+    package: ./internal/enroll/
+    tests: [TestEnroll_ConcurrentEnrollmentsAtTheLastFreeSlot]
+  - name: finalizer-added-without-the-object-version
+    file: internal/controller/registry_controller.go
+    old: "patch := client.MergeFromWithOptions(reg.DeepCopy(), client.MergeFromWithOptimisticLock{})"
+    new: "patch := client.MergeFrom(reg.DeepCopy())"
+    package: ./internal/controller/
+    tests: [TestFinalizer_AddingKeepsAForeignFinalizer]
+  - name: finalizer-dropped-without-the-object-version
+    file: internal/controller/registry_deletion.go
+    old: "patch := client.MergeFromWithOptions(reg.DeepCopy(), client.MergeFromWithOptimisticLock{})"
+    new: "patch := client.MergeFrom(reg.DeepCopy())"
+    package: ./internal/controller/
+    tests: [TestFinalizer_DroppingDoesNotResurrectARemovedFinalizer]
+  - name: project-pinned-before-the-confirmation
+    file: internal/controller/registration.go
+    old: "if rec := p.reservation.Status.Registration; rec != nil && rec.RegisteredAt != nil {"
+    new: "if rec := p.reservation.Status.Registration; rec != nil {"
+    package: ./internal/controller/
+    tests: [TestPipeline_UnconfirmedProjectFollowsTheLabel]
+  - name: unconfirmed-intent-moved-without-withdrawing-the-old-write
+    file: internal/controller/registration.go
+    old: "\tif prev.Project != \"\" {"
+    new: "\tif false {"
+    package: ./internal/controller/
+    tests: [TestPipeline_UnconfirmedProjectFollowsTheLabel]
+  - name: known-key-waits-for-the-issuer
+    file: internal/iamproxy/token.go
+    old: "\t\tif known {\n\t\t\t// Издатель обновляется в стороне; прежний снимок действует.\n\t\t\treturn k, nil\n\t\t}\n"
+    new: ""
+    package: ./internal/iamproxy/
+    tests: [TestVerifier_SilentIssuerDoesNotSerializeRequests]
+  - name: failed-key-refresh-not-backed-off
+    file: internal/iamproxy/token.go
+    old: "v.nextAt = now.Add(backoff(v.cfg.RefreshEvery, v.failures))"
+    new: "v.nextAt = now"
+    package: ./internal/iamproxy/
+    tests: [TestVerifier_FailedRefreshBacksOff]
+  - name: version-check-not-answered
+    file: internal/iamproxy/proxy.go
+    old: "if r.URL.Path == \"/v2/\" && r.URL.RawPath == \"\" && (r.Method == http.MethodGet || r.Method == http.MethodHead) {"
+    new: "if false {"
+    package: ./internal/iamproxy/
+    tests: [TestProxy_VersionCheck]
+  - name: version-check-open-on-a-private-registry
+    file: internal/iamproxy/proxy.go
+    old: "if v == allow && id == nil && !p.o.Public {"
+    new: "if v == allow && id == nil && false {"
+    package: ./internal/iamproxy/
+    tests: [TestProxy_VersionCheck]
+  - name: half-written-pair-replaces-the-working-one
+    file: internal/tlsfile/tlsfile.go
+    old: "\t\tif k.cert != nil {\n\t\t\treturn k.cert, nil\n\t\t}\n"
+    new: ""
+    package: ./internal/tlsfile/
+    tests: [TestKeyPair_ReloadedAfterRotationAndKeptOverAHalfWrittenPair]
+  - name: readiness-ignores-zot
+    file: internal/iamproxy/readiness.go
+    old: "if resp.StatusCode != http.StatusOK {"
+    new: "if false {"
+    package: ./internal/iamproxy/
+    tests: [TestReadiness_NeedsTheKeySetAndAReadyZot]
+  - name: basic-password-is-not-a-token
+    file: internal/iamproxy/proxy.go
+    old: "if _, password, ok := r.BasicAuth(); ok {"
+    new: "if _, password, ok := r.BasicAuth(); ok && false {"
+    package: ./internal/iamproxy/
+    tests: [TestProxy_RightsTable, TestProxy_VersionCheck]
+  - name: challenge-for-a-token-issuance
+    file: internal/iamproxy/proxy.go
+    old: "const challenge = `Basic realm=\"registry\"`"
+    new: "const challenge = `Bearer realm=\"registry\"`"
+    package: ./internal/iamproxy/
+    tests: [TestProxy_AnonymousAccess, TestProxy_VersionCheck, TestProxy_RefusesInvalidTokens]
+  - name: subject-taken-from-sub
+    file: internal/iamproxy/token.go
+    old: "\tid, _ := c[claimPrincipalID].(string)\n"
+    new: "\tid, _ := c[claimPrincipalID].(string)\n\tif typ == \"\" && id == \"\" {\n\t\ttyp, id = \"service_account\", fmt.Sprint(c[\"sub\"])\n\t}\n"
+    package: ./internal/iamproxy/
+    tests: [TestProxy_RefusesInvalidTokens]
+  - name: token-issuance-flag-understood
+    file: internal/iamproxy/config.go
+    old: "\tfs.DurationVar(&c.EnrollTimeout, \"enroll-timeout\""
+    new: "\tfs.String(\"realm\", \"\", \"\")\n\tfs.DurationVar(&c.EnrollTimeout, \"enroll-timeout\""
+    package: ./internal/iamproxy/
+    tests: [TestConfig_NoTokenIssuanceFlags]
+  - name: observed-template-finalizer-added-without-the-version
+    file: internal/controller/template_controller.go
+    old: "\t\tpatch := client.MergeFromWithOptions(obj.DeepCopyObject().(client.Object), client.MergeFromWithOptimisticLock{})\n\t\tcontrollerutil.AddFinalizer(obj,"
+    new: "\t\tpatch := client.MergeFrom(obj.DeepCopyObject().(client.Object))\n\t\tcontrollerutil.AddFinalizer(obj,"
+    package: ./internal/controller/
+    tests: [TestTemplateFinalizer_AddingKeepsAForeignFinalizer]
+  - name: observed-template-finalizer-dropped-without-the-version
+    file: internal/controller/template_controller.go
+    old: "\tpatch := client.MergeFromWithOptions(obj.DeepCopyObject().(client.Object), client.MergeFromWithOptimisticLock{})\n\tcontrollerutil.RemoveFinalizer(obj,"
+    new: "\tpatch := client.MergeFrom(obj.DeepCopyObject().(client.Object))\n\tcontrollerutil.RemoveFinalizer(obj,"
+    package: ./internal/controller/
+    tests: [TestTemplateFinalizer_DroppingDoesNotResurrectARemovedFinalizer]
+  - name: registry-template-finalizer-dropped-without-the-version
+    file: internal/controller/template_controller.go
+    old: "\t\t\tpatch := client.MergeFromWithOptions(rt.DeepCopy(), client.MergeFromWithOptimisticLock{})\n\t\t\tcontrollerutil.RemoveFinalizer(rt,"
+    new: "\t\t\tpatch := client.MergeFrom(rt.DeepCopy())\n\t\t\tcontrollerutil.RemoveFinalizer(rt,"
+    package: ./internal/controller/
+    tests: [TestTemplateFinalizer_DroppingDoesNotResurrectARemovedFinalizer]
+  - name: registry-template-finalizer-added-without-the-version
+    file: internal/controller/template_controller.go
+    old: "\t\tpatch := client.MergeFromWithOptions(rt.DeepCopy(), client.MergeFromWithOptimisticLock{})\n\t\tcontrollerutil.AddFinalizer(rt,"
+    new: "\t\tpatch := client.MergeFrom(rt.DeepCopy())\n\t\tcontrollerutil.AddFinalizer(rt,"
+    package: ./internal/controller/
+    tests: [TestTemplateFinalizer_AddingKeepsAForeignFinalizer]
+  - name: stop-leaves-compensations-running-uncounted
+    file: internal/enroll/server.go
+    old: "\ts.haltCancel()\n\t<-done\n"
+    new: ""
+    package: ./internal/enroll/
+    tests: [TestEnroll_StopAbandonsARunningCompensationWithItsAccount]
+  - name: refused-token-read-as-a-denial
+    file: internal/iamproxy/authz.go
+    old: "\tcase http.StatusUnauthorized:\n\t\treturn false, ErrUnauthenticated\n"
+    new: "\tcase http.StatusUnauthorized:\n\t\treturn false, nil\n"
+    package: ./internal/iamproxy/
+    tests: [TestProxy_TokenKanameDoesNotAuthenticateIsNotAnAllow]
