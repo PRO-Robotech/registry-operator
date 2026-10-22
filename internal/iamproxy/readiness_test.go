@@ -36,10 +36,10 @@ func TestReadiness_NeedsTheKeySetAndAReadyZot(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			var asked atomic.Int64
-			var path atomic.Value
+			var seen atomic.Value
 			zot := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				asked.Add(1)
-				path.Store(r.URL.Path)
+				seen.Store(r.URL.Path)
 				w.WriteHeader(c.zot)
 			}))
 			u, _ := url.Parse(zot.URL)
@@ -57,8 +57,8 @@ func TestReadiness_NeedsTheKeySetAndAReadyZot(t *testing.T) {
 			if got := asked.Load() > 0; got != c.asksZot {
 				t.Fatalf("zot asked: %v, want %v", got, c.asksZot)
 			}
-			if c.asksZot && path.Load() != "/readyz" {
-				t.Fatalf("zot asked at %v", path.Load())
+			if c.asksZot && seen.Load() != "/readyz" {
+				t.Fatalf("zot asked at %v", seen.Load())
 			}
 		})
 	}
