@@ -115,6 +115,10 @@ func (c client) pushBlob(repo string, blob []byte) string {
 	if err != nil {
 		c.t.Fatal(err)
 	}
+	// Абсолютный адрес увёл бы клиента мимо прокси прямо в zot.
+	if loc.IsAbs() || loc.Host != "" {
+		c.t.Fatalf("upload location %q leads past the proxy", loc)
+	}
 	base, _ := url.Parse(c.base)
 	target := base.ResolveReference(loc)
 	q := target.Query()
