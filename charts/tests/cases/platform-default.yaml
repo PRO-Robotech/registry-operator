@@ -16,15 +16,20 @@ site:
     address: https://vault.vault.svc:8200
     tokenAudience: vault
   kaname:
-    apiURL: https://kaname.example.test
+    address: kaname.example.test:9090
+    serverName: kaname.example.test
     jwksURL: https://kaname.example.test:9097/.well-known/jwks.json
     issuer: https://kaname.example.test
     audience: registry
   registryOperator:
-    registrationURL: https://registry-operator.registry-system.svc:9443/v1/repositories
+    registrationURL: https://registry-operator.registry-system.svc:8443
     tokenAudience: registry-operator
   iamProxy:
     decisionCacheTTL: 10s
+    checkTimeout: 2s
+    enrollTimeout: 15s
+    realm: https://registry.example.test/iam/token
+    service: registry.example.test
   images:
     zot:
       repository: ghcr.io/project-zot/zot-linux-amd64
@@ -35,6 +40,7 @@ site:
       tag: v0.1.0
       digest: sha256:2e7b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809
   edge:
+    routeNamespace: registry-edge
     proxy:
       namespace: envoy-gateway-system
       gateway:
@@ -53,12 +59,12 @@ site:
         ports: [8200]
     kaname:
       - fqdn: kaname.example.test
-        ports: [443, 9097]
+        ports: [9090, 9097]
     registryOperator:
       - namespace: registry-system
         labels:
           app.kubernetes.io/name: registry-operator
-        ports: [9443]
+        ports: [8443]
   resources:
     zot:
       requests: {cpu: 100m, memory: 256Mi}

@@ -105,6 +105,19 @@ def containers(dep):
     return spec.get("initContainers", []) + spec.get("containers", [])
 
 
+README = pathlib.Path(__file__).resolve().parents[1] / "registry-instance" / "README.md"
+
+
+def contract_flags():
+    """Флаги iam-proxy из таблицы контракта README чарта: строки «| `--имя=…` |»."""
+    names = []
+    for line in README.read_text(encoding="utf-8").splitlines():
+        m = re.match(r"^\| `(--[a-z][a-z-]*)=", line)
+        if m:
+            names.append(m.group(1))
+    return names
+
+
 def ports_of(rule):
     got = set()
     for tp in rule.get("toPorts", []):
@@ -122,8 +135,8 @@ def cmd_probe_instance(render, site_file, vars_file, probes_on):
         v = yaml.safe_load(f)["variables"]
     base = "zot-" + v["id"]
     kinds = sorted(d["kind"] for d in ds)
-    p.check(kinds == ["CiliumNetworkPolicy", "Deployment", "Service", "ServiceAccount"],
-            f"exactly zot with its iam-proxy is rendered, got {kinds}")
+    p.check(kinds == ["CiliumNetworkPolicy", "Deployment", "ReferenceGrant", "Service", "ServiceAccount"],
+            f"exactly zot with its iam-proxy and the grant of its route is rendered, got {kinds}")
     text = yaml.safe_dump_all(ds)
     p.check("PersistentVolumeClaim" not in text and "persistentVolumeClaim" not in text
             and "volumeClaimTemplates" not in text and "hostPath" not in text,
@@ -161,27 +174,53 @@ def cmd_probe_instance(render, site_file, vars_file, probes_on):
         p.check(proxy.get("image", "").startswith(img["repository"] + ":" + img["tag"] + "@"),
                 "iam-proxy runs the site image of registry-iam-proxy")
         args = proxy["args"]
+        p.check(all(re.fullmatch(r"--[a-z][a-z-]*=.*", a) for a in args), f"every iam-proxy argument is --flag=value, got {args}")
+        got = dict(a.split("=", 1) for a in args if "=" in a)
+        p.check(len(got) == len(args), "no iam-proxy flag is given twice")
+        contract = contract_flags()
+        p.check(len(contract) > 0, "the iam-proxy flag contract in the registry-instance README is read")
+        p.check(sorted(got) == sorted(contract), f"iam-proxy flags are exactly the README contract: extra {sorted(set(got) - set(contract))}, missing {sorted(set(contract) - set(got))}")
+        ca = "/etc/registry/ca/" + site["caBundle"]["key"]
         want = {
+            "--listen": ":8080",
+            "--health-listen": ":8081",
+            "--upstream": "http://127.0.0.1:5000",
+            "--upstream-ready-path": "/readyz",
             "--registry-id": v["id"],
-            "--anonymous-pull": v["public"],
-            "--kaname-api-url": site["kaname"]["apiURL"],
+            "--public": v["public"],
             "--jwks-url": site["kaname"]["jwksURL"],
+            "--jwks-ca": ca,
             "--issuer": site["kaname"]["issuer"],
             "--audience": site["kaname"]["audience"],
-            "--decision-cache-ttl": site["iamProxy"]["decisionCacheTTL"],
-            "--registration-url": site["registryOperator"]["registrationURL"],
-            "--upstream": "http://127.0.0.1:5000",
+            "--kaname-address": site["kaname"].get("address"),
+            "--kaname-server-name": site["kaname"].get("serverName"),
+            "--kaname-ca": ca,
+            "--check-timeout": site["iamProxy"].get("checkTimeout"),
+            "--cache-ttl": site["iamProxy"]["decisionCacheTTL"],
+            "--enroll-url": site["registryOperator"]["registrationURL"],
+            "--enroll-ca": ca,
+            "--enroll-token-file": "/var/run/secrets/registry-operator/token",
+            "--enroll-timeout": site["iamProxy"].get("enrollTimeout"),
+            "--realm": site["iamProxy"].get("realm"),
+            "--service": site["iamProxy"].get("service"),
         }
-        got = dict(a.split("=", 1) for a in args if "=" in a)
         for k, val in want.items():
-            p.check(got.get(k) == val, f"iam-proxy {k}={val}, got {got.get(k)}")
+            p.check(val is not None and got.get(k) == val, f"iam-proxy {k}={val}, got {got.get(k)}")
         p.check(not any("9091" in a for a in args), "iam-proxy never names the kaname internal listener")
-        ttl = int(got.get("--decision-cache-ttl", "99s")[:-1])
+        ttl = int(got.get("--cache-ttl", "99s")[:-1])
         p.check(1 <= ttl <= 10, "verdict cache is at most 10 s")
         p.check([(pp["name"], pp["containerPort"]) for pp in proxy["ports"]] == [("proxy", 8080), ("health", 8081)],
                 "iam-proxy listens on :8080 (proxy) and :8081 (probes)")
-        p.check(proxy["readinessProbe"]["httpGet"]["port"] == "health" and proxy["livenessProbe"]["httpGet"]["port"] == "health",
-                "probes go to the health port")
+        rp, lp, sp = proxy.get("readinessProbe", {}), proxy.get("livenessProbe", {}), proxy.get("startupProbe", {})
+        p.check(rp.get("httpGet") == {"path": "/readyz", "port": "health"},
+                "readiness is /readyz of iam-proxy: it answers 200 only while zot answers its own /readyz")
+        p.check(lp.get("httpGet") == {"path": "/healthz", "port": "health"},
+                "liveness is /healthz of iam-proxy: the process only, not zot or kaname")
+        p.check(sp.get("httpGet") == {"path": "/readyz", "port": "health"}
+                and sp.get("periodSeconds", 0) * sp.get("failureThreshold", 0) >= 300,
+                "startup waits for zot behind /readyz at least 300 s before liveness starts")
+        p.check(all(k not in zot for k in ("readinessProbe", "livenessProbe", "startupProbe")),
+                "zot carries no probe of its own: it listens on the pod loopback, out of kubelet reach")
         p.check("ports" not in zot, "zot exposes no port")
         p.check(zot["args"] == ["serve", "/vault/secrets/config.json"], "zot reads the rendered config")
         vols = {x["name"]: x for x in pod["volumes"]}
@@ -228,6 +267,18 @@ def cmd_probe_instance(render, site_file, vars_file, probes_on):
             p.check(probe_cfg.count("{{") == 0, "no other template actions in the config")
         except (ValueError, KeyError) as e:
             p.check(False, f"config template is JSON with two leaf keys: {e}")
+    grants = [d for d in ds if d["kind"] == "ReferenceGrant"]
+    p.check(len(grants) == 1, f"exactly one ReferenceGrant, got {len(grants)}")
+    route_ns = site.get("edge", {}).get("routeNamespace")
+    p.check(bool(route_ns), "the site names the namespace of the edge routes")
+    for g in grants:
+        p.check(g["apiVersion"] == "gateway.networking.k8s.io/v1beta1", "ReferenceGrant of Gateway API v1beta1")
+        p.check(g["metadata"].get("annotations", {}).get("argocd.argoproj.io/sync-wave") == "0",
+                "the grant is applied in wave 0, before the route can resolve")
+        p.check(g["spec"].get("from") == [{"group": "gateway.networking.k8s.io", "kind": "HTTPRoute", "namespace": route_ns}],
+                "the grant admits only HTTPRoutes of the edge route namespace")
+        p.check(g["spec"].get("to") == [{"group": "", "kind": "Service", "name": base}],
+                f"the grant opens only Service {base}")
     svc = by.get("Service")
     if svc:
         p.check([(x["port"], x["targetPort"]) for x in svc["spec"]["ports"]] == [(8080, "proxy")], "Service exposes only iam-proxy")
@@ -268,7 +319,7 @@ def cmd_probe_instance(render, site_file, vars_file, probes_on):
         p.check("9091" not in all_ports, f"no egress to the kaname internal listener, got {sorted(all_ports)}")
         dns_names = {r.get("matchName") for r in dns["toPorts"][0]["rules"]["dns"] if "matchName" in r}
         hosts = {s3host} | {re.sub(r"^https://([^/:]+).*$", r"\1", u) for u in (
-            site["vault"]["address"], site["kaname"]["apiURL"], site["kaname"]["jwksURL"], site["registryOperator"]["registrationURL"])}
+            site["vault"]["address"], "https://" + str(site["kaname"].get("address")), site["kaname"]["jwksURL"], site["registryOperator"]["registrationURL"])}
         p.check(hosts <= dns_names, f"S3, Vault, kaname and registry-operator hosts resolvable, missing {sorted(hosts - dns_names)}")
     return p.done()
 
@@ -305,32 +356,42 @@ def cmd_probe_platform(render, mode):
     cm, m = manifest_of(ds)
     p.check(cm is not None, "kaname module manifest of registry is rendered")
     if cm is not None:
+        labels = cm["metadata"]["labels"]
         p.check(list(cm["data"]) == ["registry.manifest.yaml"], "the manifest ConfigMap carries exactly one delivery key")
-        p.check(cm["metadata"]["labels"].get("app.kubernetes.io/part-of") == "registry", "manifest ConfigMap is labelled part-of registry")
+        p.check(labels.get("app.kubernetes.io/part-of") == "registry", "manifest ConfigMap is labelled part-of registry")
+        p.check(labels.get("kaname.in-cloud.io/module-manifest") == "true",
+                "manifest ConfigMap carries the delivery label kaname collects module manifests by")
+        text = cm["data"]["registry.manifest.yaml"]
         p.check(m.get("apiVersion") == "iam/v1" and m.get("module") == "registry", "manifest of module registry, iam/v1")
-        res = {r["objectType"]: r for r in m.get("resources", [])}
-        p.check(sorted(res) == ["registry_registry", "registry_repository"], f"types registry_registry and registry_repository, got {sorted(res)}")
-        p.check(res.get("registry_registry", {}).get("parents") == ["project"], "a registry hangs under its project")
-        p.check(res.get("registry_repository", {}).get("parents") == [{"name": "parent", "type": "registry_registry"}],
-                "a repository hangs under its registry")
-        verbs = {r: {x["name"] for x in res.get(r, {}).get("verbs", [])} for r in res}
-        p.check({"get", "create", "update"} <= verbs.get("registry_registry", set()), "registry has get, create, update")
-        p.check({"get", "update"} <= verbs.get("registry_repository", set()), "repository has get, update")
+        # Типы registry_registry и registry_repository несёт канон модели образа kaname, и
+        # доставка обязана совпасть с ним побайтово: свой раздел resources либо повторил бы
+        # чужой текст, либо остановил бы kaname. Модуль объявляет только роли и личность.
+        p.check("resources" not in m, f"no resources section: the registry types are the kaname canon, got {sorted(m)}")
+        p.check(sorted(m) == ["apiVersion", "module", "roles", "seed"], f"sections apiVersion, module, roles, seed, got {sorted(m)}")
+        p.check("user:*" not in text and "notes" not in text,
+                "no wildcard subject and no model prose: public pull is the proxy flag only")
         roles = {r["id"]: r for r in m.get("roles", [])}
         p.check(sorted(roles) == ["registry.admin", "registry.puller", "registry.pusher"], f"roles puller, pusher, admin, got {sorted(roles)}")
         want = {"registry.puller": (["get"], ["get", "list"]),
                 "registry.pusher": (["get", "create"], ["get", "list", "update"]),
                 "registry.admin": (["get", "list", "create", "update", "delete"], ["get", "list", "update", "delete"])}
         for rid, (reg, repo) in want.items():
-            rules = roles.get(rid, {}).get("rules", [])
-            ok = (len(rules) == 1 and rules[0].get("resources") == ["registries"] and rules[0].get("classes") == reg
+            role = roles.get(rid, {})
+            rules = role.get("rules", [])
+            ok = (len(rules) == 1 and rules[0].get("module") == "registry" and rules[0].get("resources") == ["registries"]
+                  and rules[0].get("classes") == reg
                   and rules[0].get("children") == [{"resources": ["repositories"], "classes": repo}])
             p.check(ok, f"{rid}: {reg} on the registry and {repo} on each of its repositories through children")
+            p.check(role.get("tier") == {"tierType": "iam.cluster", "tierId": "cluster_root"} and bool(role.get("description")),
+                    f"{rid}: cluster tier, described")
         seed = m.get("seed", {})
-        sas = [s["name"] for s in seed.get("serviceAccounts", [])]
-        p.check(sas == ["kacho-registry"], f"seed: only the module identity kacho-registry, got {sas}")
-        joins = [(j["serviceAccount"]["name"], j["group"]["name"]) for j in seed.get("joins", [])]
-        p.check(joins == [("kacho-registry", "module-relation-writers")], f"kacho-registry writes ownership tuples, got {joins}")
+        p.check(sorted(seed) == ["joins", "serviceAccounts"], f"seed: identity and its join only, got {sorted(seed)}")
+        sas = [(s["name"], s["account"]) for s in seed.get("serviceAccounts", [])]
+        p.check(sas == [("kacho-registry", "kacho-system")], f"seed: only the module identity kacho-registry, got {sas}")
+        joins = [(j["serviceAccount"]["name"], j["serviceAccount"]["account"], j["group"]["name"], j["group"]["account"])
+                 for j in seed.get("joins", [])]
+        p.check(joins == [("kacho-registry", "kacho-system", "module-relation-writers", "kacho-system")],
+                f"kacho-registry writes ownership tuples, got {joins}")
     vap = kinds.get("ValidatingAdmissionPolicy", [])
     bind = kinds.get("ValidatingAdmissionPolicyBinding", [])
     proj = kinds.get("AppProject", [])
@@ -355,6 +416,10 @@ def cmd_probe_platform(render, mode):
                 s = d["spec"]
                 p.check(len(s["destinations"]) == 1 and s["clusterResourceWhitelist"] == [] and "sourceNamespaces" not in s,
                         f"{d['metadata']['name']} has one destination and no cluster resources")
+                kinds_ok = sorted((r["group"], r["kind"]) for r in s["namespaceResourceWhitelist"])
+                p.check(kinds_ok == [("", "Service"), ("", "ServiceAccount"), ("apps", "Deployment"),
+                                     ("cilium.io", "CiliumNetworkPolicy"), ("gateway.networking.k8s.io", "ReferenceGrant")],
+                        f"{d['metadata']['name']} deploys exactly the kinds of registry-instance, got {kinds_ok}")
             if d["kind"] == "ConfigMap" and d["metadata"]["name"] == "registry-platform-admission":
                 p.check("registrar" not in d["data"] and "pkiPolicy" not in d["data"],
                         "no second registry writer and no data-plane PKI in the parameters")

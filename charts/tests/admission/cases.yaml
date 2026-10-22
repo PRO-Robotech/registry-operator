@@ -56,6 +56,13 @@ objects:
     kind: Service
     metadata: {name: zot-abc123, namespace: cust01}
     spec: {selector: {app.kubernetes.io/name: zot}, ports: [{name: http, port: 8080, targetPort: 8080}]}
+  zotgrant: &zotgrant
+    apiVersion: gateway.networking.k8s.io/v1beta1
+    kind: ReferenceGrant
+    metadata: {name: zot-abc123, namespace: cust01}
+    spec:
+      from: [{group: gateway.networking.k8s.io, kind: HTTPRoute, namespace: registry-edge}]
+      to: [{group: "", kind: Service, name: zot-abc123}]
   zotpod: &zotpod
     apiVersion: v1
     kind: Pod
@@ -204,6 +211,8 @@ cases:
   # V8 — рабочая нагрузка zot-*.
   - {name: v8-stranger-creates-zot-service, policy: v8-registry-zot-workload, as: stranger, verb: create, expect: deny, object: *zotsvc}
   - {name: v8-argo-creates-zot-service, policy: v8-registry-zot-workload, as: argo, verb: create, expect: allow, object: *zotsvc}
+  - {name: v8-stranger-creates-zot-grant, policy: v8-registry-zot-workload, as: stranger, verb: create, expect: deny, object: *zotgrant}
+  - {name: v8-argo-creates-zot-grant, policy: v8-registry-zot-workload, as: argo, verb: create, expect: allow, object: *zotgrant}
   - {name: v8-stranger-mounts-sa-token, policy: v8-registry-zot-workload, as: stranger, verb: patch, expect: deny, kind: serviceaccount, namespace: cust01, target: zot-abc123, patch: {automountServiceAccountToken: true}}
   - {name: v8-stranger-annotates-sa, policy: v8-registry-zot-workload, as: stranger, verb: patch, expect: allow, kind: serviceaccount, namespace: cust01, target: zot-abc123, patch: {metadata: {annotations: {note: seen}}}}
   - {name: v8-stranger-deletes-sa, policy: v8-registry-zot-workload, as: stranger, verb: delete, expect: deny, kind: serviceaccount, namespace: cust01, target: zot-abc123}
@@ -232,6 +241,8 @@ cases:
   - {name: v13-stranger-creates-project, policy: v13-registry-appprojects, as: stranger, verb: create, expect: deny, object: *project, rename: registry-cust02, set: {spec.destinations: [{server: "https://kubernetes.default.svc", namespace: cust02}]}}
   - {name: v13-platform-creates-project, policy: v13-registry-appprojects, as: platform, verb: create, expect: allow, object: *project, rename: registry-cust02, set: {spec.destinations: [{server: "https://kubernetes.default.svc", namespace: cust02}]}}
   - {name: v13-platform-project-with-source-namespaces, policy: v13-registry-appprojects, as: platform, verb: create, expect: deny, object: *project, rename: registry-cust02, set: {spec.destinations: [{server: "https://kubernetes.default.svc", namespace: cust02}], spec.sourceNamespaces: ["*"]}}
+  - {name: v13-platform-project-deploys-route-grant, policy: v13-registry-appprojects, as: platform, verb: create, expect: allow, object: *project, rename: registry-cust02, set: {spec.destinations: [{server: "https://kubernetes.default.svc", namespace: cust02}], spec.namespaceResourceWhitelist: [{group: gateway.networking.k8s.io, kind: ReferenceGrant}]}}
+  - {name: v13-platform-project-deploys-route, policy: v13-registry-appprojects, as: platform, verb: create, expect: deny, object: *project, rename: registry-cust02, set: {spec.destinations: [{server: "https://kubernetes.default.svc", namespace: cust02}], spec.namespaceResourceWhitelist: [{group: gateway.networking.k8s.io, kind: HTTPRoute}]}}
   - {name: v13-platform-project-to-foreign-namespace, policy: v13-registry-appprojects, as: platform, verb: create, expect: deny, object: *project, rename: registry-cust02}
   # V14 — роль Vault и бакет заказа.
   - {name: v14-stranger-creates-vaultclaim, policy: v14-registry-vault-claims, as: stranger, verb: create, expect: deny, object: *vaultclaim}

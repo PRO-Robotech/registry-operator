@@ -2,4 +2,4 @@
 # expect: at '/site/registryOperator/registrationURL'
 site:
   registryOperator:
-    registrationURL: http://registry-operator.registry-system.svc:9443/v1/repositories
+    registrationURL: http://registry-operator.registry-system.svc:8443
