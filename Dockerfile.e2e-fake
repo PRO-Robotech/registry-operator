@@ -1,0 +1,16 @@
+# Copyright (c) PRO-Robotech
+# SPDX-License-Identifier: Apache-2.0
+# Двойник kaname для проб на kind; в посадку не входит.
+FROM golang:1.26.8 AS builder
+WORKDIR /workspace
+COPY go.mod go.sum ./
+RUN go mod download
+COPY api/ api/
+COPY internal/ internal/
+COPY test/e2e/fakekaname/ test/e2e/fakekaname/
+RUN CGO_ENABLED=0 go build -trimpath -o fakekaname ./test/e2e/fakekaname
+
+FROM gcr.io/distroless/static:nonroot
+COPY --from=builder /workspace/fakekaname /fakekaname
+USER 65532:65532
+ENTRYPOINT ["/fakekaname"]

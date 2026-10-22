@@ -89,6 +89,9 @@ docker-build: ## Оба образа.
 
 ##@ Инструменты
 
+.PHONY: kind
+kind: $(KIND) ## kind закреплённой версии в bin/.
+
 $(CONTROLLER_GEN): | $(LOCALBIN)
 	$(call go-install-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen,$(CONTROLLER_TOOLS_VERSION))
 

@@ -91,6 +91,60 @@ jobs:
           set -e
           [ $code -ne 0 ] && grep -q 'image.tag and image.digest' <<<"$out"
 
+  kind-e2e:
+    name: kind e2e (operator under its own role)
+    runs-on: ubuntu-latest
+    needs: [test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+      - name: local registry and kind
+        run: |
+          docker run -d --restart=always -p 127.0.0.1:5001:5000 --name kind-registry registry:2
+          make kind
+          cat > kind.yaml <<'KIND'
+          kind: Cluster
+          apiVersion: kind.x-k8s.io/v1alpha4
+          containerdConfigPatches:
+          - |-
+            [plugins."io.containerd.grpc.v1.cri".registry]
+              config_path = "/etc/containerd/certs.d"
+          KIND
+          bin/kind-v0.33.0 create cluster --config kind.yaml --wait 180s
+          for node in $(bin/kind-v0.33.0 get nodes); do
+            docker exec "$node" mkdir -p /etc/containerd/certs.d/localhost:5001
+            printf '[host."http://kind-registry:5000"]\n' | docker exec -i "$node" cp /dev/stdin /etc/containerd/certs.d/localhost:5001/hosts.toml
+          done
+          docker network connect kind kind-registry
+      - name: images and stand chart
+        id: img
+        run: |
+          docker build -t localhost:5001/registry-operator:e2e -f Dockerfile .
+          docker build -t localhost:5001/kaname-fake:e2e -f Dockerfile.e2e-fake .
+          docker push localhost:5001/registry-operator:e2e
+          docker push localhost:5001/kaname-fake:e2e
+          echo "operator=$(docker inspect --format '{{index .RepoDigests 0}}' localhost:5001/registry-operator:e2e)" >> "$GITHUB_OUTPUT"
+          echo "fake=$(docker inspect --format '{{index .RepoDigests 0}}' localhost:5001/kaname-fake:e2e)" >> "$GITHUB_OUTPUT"
+          helm package test/e2e/testdata/registry-instance -d /tmp/chart
+          out=$(helm push /tmp/chart/registry-instance-1.0.0.tgz oci://localhost:5001/charts --plain-http 2>&1); echo "$out"
+          echo "chart=$(grep -o 'sha256:[a-f0-9]\{64\}' <<<"$out" | head -1)" >> "$GITHUB_OUTPUT"
+      - run: make crds
+      - name: e2e
+        env:
+          E2E_OPERATOR_IMAGE: ${{ steps.img.outputs.operator }}
+          E2E_FAKE_IMAGE: ${{ steps.img.outputs.fake }}
+          E2E_CHART_HOST: kind-registry:5000
+          E2E_CHART_DIGEST: ${{ steps.img.outputs.chart }}
+        run: REGOP_TEST_CRDS="$PWD/bin/crds" go test -tags=e2e -count=1 -timeout 30m ./test/e2e/ -v
+      - name: operator log
+        if: failure()
+        run: kubectl -n registry-system logs deploy/registry-operator --tail=300 || true
+
   docker:
     name: images
     runs-on: ubuntu-latest

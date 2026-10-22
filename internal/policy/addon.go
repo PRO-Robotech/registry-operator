@@ -78,7 +78,7 @@ type AddonPolicy struct {
 
 var (
 	extraVarKey  = regexp.MustCompile(`^[a-z][A-Za-z0-9]{0,62}$`)
-	extraVarVal  = regexp.MustCompile(`^[A-Za-z0-9._:/@=+,-]{0,1024}$`)
+	extraVarVal  = regexp.MustCompile(`^[A-Za-z0-9._:/@=+,-]*$`)
 	selectorName = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 	chartVersion = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$`)
 )
@@ -90,6 +90,8 @@ const (
 	LabelAddonValueValues = "addons.in-cloud.io/values"
 	// MaxVariables — предел числа переменных Addon заказа.
 	MaxVariables = 32
+	// maxVariableValue — предел длины значения переменной.
+	maxVariableValue = 1024
 	// defaultMaxValuesSelectors — предел числа селекторов по умолчанию.
 	defaultMaxValuesSelectors = 16
 )
@@ -407,8 +409,8 @@ func checkVariables(v *Violations, vars map[string]string, o Order, templateVars
 		// Значения подставляются в шаблоны AddonValue платформы, которые
 		// addons-operator исполняет с полным sprig: ни {{, ни <path: (третий
 		// движок подстановки плагина) в значение не попадает по построению.
-		if val := vars[k]; !extraVarVal.MatchString(val) {
-			v.add("spec.variables."+k, "value must match %s", extraVarVal.String())
+		if val := vars[k]; len(val) > maxVariableValue || !extraVarVal.MatchString(val) {
+			v.add("spec.variables."+k, "value must match %s and hold at most %d bytes", extraVarVal.String(), maxVariableValue)
 		}
 	}
 }
