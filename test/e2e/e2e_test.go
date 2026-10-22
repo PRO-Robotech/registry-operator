@@ -57,7 +57,7 @@ const (
 
 var k8s client.Client
 
-func sh(t *testing.T, stdin []byte, name string, args ...string) string {
+func sh(t *testing.T, stdin []byte, name string, args ...string) {
 	t.Helper()
 	cmd := exec.Command(name, args...)
 	cmd.Dir = root
@@ -68,7 +68,6 @@ func sh(t *testing.T, stdin []byte, name string, args ...string) string {
 	if err != nil {
 		t.Fatalf("%s %s: %v\n%s", name, strings.Join(args, " "), err, out)
 	}
-	return string(out)
 }
 
 func eventually(t *testing.T, what string, f func() error) {
