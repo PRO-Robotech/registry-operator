@@ -229,3 +229,9 @@ injections:
     new: ""
     package: ./internal/tlsfile/
     tests: [TestKeyPair_ReloadedAfterRotationAndKeptOverAHalfWrittenPair]
+  - name: readiness-ignores-zot
+    file: internal/iamproxy/readiness.go
+    old: "if resp.StatusCode != http.StatusOK {"
+    new: "if false {"
+    package: ./internal/iamproxy/
+    tests: [TestReadiness_NeedsTheKeySetAndAReadyZot]

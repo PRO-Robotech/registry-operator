@@ -24,8 +24,11 @@ type Config struct {
 	Listen       string
 	HealthListen string
 	Upstream     string
-	RegistryID   string
-	Public       bool
+	// UpstreamReadyPath — путь готовности zot, который спрашивает /readyz
+	// прокси.
+	UpstreamReadyPath string
+	RegistryID        string
+	Public            bool
 
 	JWKSURL    string
 	JWKSCAFile string
@@ -57,6 +60,7 @@ func (c *Config) BindFlags(fs *flag.FlagSet) {
 	fs.StringVar(&c.Listen, "listen", ":8080", "address of the registry listener")
 	fs.StringVar(&c.HealthListen, "health-listen", ":8081", "address of the health and metrics listener")
 	fs.StringVar(&c.Upstream, "upstream", "http://127.0.0.1:5000", "zot on the loopback of the pod")
+	fs.StringVar(&c.UpstreamReadyPath, "upstream-ready-path", "/readyz", "readiness path of zot asked by the proxy readiness")
 	fs.StringVar(&c.RegistryID, "registry-id", "", "id of the registry")
 	fs.BoolVar(&c.Public, "public", false, "anonymous pull is allowed")
 	fs.StringVar(&c.JWKSURL, "jwks-url", "", "https URL of the issuer key set")
@@ -83,6 +87,9 @@ func (c *Config) Validate() error {
 	add := func(format string, args ...any) { errs = append(errs, fmt.Errorf(format, args...)) }
 	if !kaname.ValidID(c.RegistryID) {
 		add("registry-id is required")
+	}
+	if u, err := url.Parse(c.UpstreamReadyPath); err != nil || !strings.HasPrefix(c.UpstreamReadyPath, "/") || u.Path != c.UpstreamReadyPath || u.RawQuery != "" {
+		add("upstream-ready-path must be an absolute path without a query")
 	}
 	if u, err := url.Parse(c.JWKSURL); err != nil || u.Scheme != "https" || u.Host == "" {
 		add("jwks-url must be an https URL")

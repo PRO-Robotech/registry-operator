@@ -77,7 +77,7 @@ func TestNewOperatorEnroller_OnlyHTTPS(t *testing.T) {
 
 func validConfig() iamproxy.Config {
 	return iamproxy.Config{
-		Listen: ":8080", HealthListen: ":8081", Upstream: "http://127.0.0.1:5000", RegistryID: "abc123",
+		Listen: ":8080", HealthListen: ":8081", Upstream: "http://127.0.0.1:5000", UpstreamReadyPath: "/readyz", RegistryID: "abc123",
 		JWKSURL: "https://iam.example.test/jwks", JWKSCAFile: "/ca", Issuer: "https://iam.example.test", Audience: "registry", TokenTypes: "at+jwt",
 		KanameAddress: "kaname.iam-system.svc:9090", KanameServerName: "kaname.iam-system.svc", KanameCAFile: "/ca",
 		CheckTimeout: 2e9, CacheTTL: 10e9,
@@ -108,6 +108,8 @@ func TestConfig_RefusesAnIncompleteOrUnsafeConfiguration(t *testing.T) {
 		"no token types":          {func(c *iamproxy.Config) { c.TokenTypes = " " }, "token-types"},
 		"check without deadline":  {func(c *iamproxy.Config) { c.CheckTimeout = 0 }, "check-timeout"},
 		"no realm for the client": {func(c *iamproxy.Config) { c.Realm = "" }, "realm"},
+		"relative ready path":     {func(c *iamproxy.Config) { c.UpstreamReadyPath = "readyz" }, "upstream-ready-path"},
+		"ready path with a query": {func(c *iamproxy.Config) { c.UpstreamReadyPath = "/readyz?x=1" }, "upstream-ready-path"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			bad := validConfig()
