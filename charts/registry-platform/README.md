@@ -93,8 +93,12 @@ Gateway API, которых ещё нет. При установке `helm insta
   | роль | регистри | репозитории |
   |---|---|---|
   | `registry.puller` | get | get, list |
-  | `registry.pusher` | get, create | get, list, update |
-  | `registry.admin` | get, list, create, update, delete | get, list, update, delete |
+  | `registry.pusher` | get, update | get, list, update |
+  | `registry.admin` | get, list, update, delete | get, list, update, delete |
+
+  Класса `create` на регистри у ролей нет: kaname ролью модуля его не выдаёт (ни одно действие
+  каталога прав его не спрашивает, суд ролей отказывает). Заведение репозитория в регистри —
+  `update` на регистри.
 
   Роботу CI registry-operator выдаёт `registry.pusher` точечно на `registry.registries:<id>`.
   Права «на аккаунт» для людей и групп — выдача с областью `iam.account` и целью `allInScope`:

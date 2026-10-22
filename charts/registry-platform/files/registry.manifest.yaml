@@ -96,7 +96,9 @@ resources:
 # область iam.account с allInScope (каскадно, выдаёт платформа или владелец аккаунта).
 # Верхнее правило — глаголы на сам регистри; вложенное (children) — на каждый его
 # репозиторий, в том числе заведённый после выдачи: репозиторий регистрируется с цепью
-# предков [registry_registry:<id>, project:<prj>].
+# предков [registry_registry:<id>, project:<prj>]. Класса create на регистри роль модуля не
+# несёт: kaname его ролью модуля не выдаёт (ни одно действие каталога прав его не спрашивает),
+# поэтому заведение репозитория в регистри iam-proxy судит глаголом update на регистри.
 roles:
 
   - id: registry.puller
@@ -120,7 +122,7 @@ roles:
     rules:
       - module: registry
         resources: [registries]
-        classes: [get, create]
+        classes: [get, update]
         children:
           - resources: [repositories]
             classes: [get, list, update]
@@ -133,7 +135,7 @@ roles:
     rules:
       - module: registry
         resources: [registries]
-        classes: [get, list, create, update, delete]
+        classes: [get, list, update, delete]
         children:
           - resources: [repositories]
             classes: [get, list, update, delete]

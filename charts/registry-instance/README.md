@@ -109,7 +109,8 @@ Argo CD.
 
 Права, которые спрашивает прокси: pull — `v_get` на `registry_repository:<id>/<repo>`; push в
 зарегистрированный репозиторий — `v_update` на нём; новый репозиторий (не зарегистрирован) —
-`v_create` на `registry_registry:<id>`, затем заявка на регистрацию. `Authorization` и `Cookie`
+`v_update` на `registry_registry:<id>` (роль модуля kaname выдаёт на регистри только get, list,
+update, delete), затем заявка на регистрацию. `Authorization` и `Cookie`
 клиента в zot не уходят; тела ответов zot 5xx/401 наружу не отдаются; `/v2/_catalog` и
 `/v2/_zot/*` закрыты.
 
