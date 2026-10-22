@@ -53,7 +53,7 @@ func TestParse_RefusesAnIncompleteOrUnsafeConfiguration(t *testing.T) {
 		{"no hostnames", "hostnames: [registry.example.test]", "hostnames: []", "route.hostnames"},
 		{"create namespace allowed", "allowed: [ServerSideApply=true,", "allowed: [CreateNamespace=true, ServerSideApply=true,", "CreateNamespace"},
 		{"chart pin without digest", "digest: sha256:acf4e9b3f3cace43e81cb7eae9c52553217f30b4578fd812ef55657286390304", "digest: latest", "charts[0]"},
-		{"values prefix overlaps the order addons", "valuesAddonPrefix: registry-platform", "valuesAddonPrefix: reg-", "valuesAddonPrefix"},
+		{"values prefix overlaps the order addons", "valuesAddonPrefix: registry-instance", "valuesAddonPrefix: reg-", "valuesAddonPrefix"},
 		{"retry unbounded", "maxRetryLimit: 10", "maxRetryLimit: 0", "maxRetryLimit"},
 		{"zero not-ready interval", "notReady: 15s", "notReady: 0s", "intervals.notReady"},
 		{"recovery ceiling below its start", "maxDelay: 30m", "maxDelay: 10s", "syncRecovery.maxDelay"},

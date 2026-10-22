@@ -22,7 +22,9 @@ spec:
     storage:
       vaultConfig: s3-bucket
       secretsPrefix: clusters/site-a
-      region: ""
+      # Регион S3 площадки — обязателен: без непустого имени ревизия не
+      # принимается (чарт registry-instance отверг бы Addon без региона).
+      region: ru-1
     secrets:
       vaultConfig: default
       secretsPrefix: clusters/site-a
@@ -34,7 +36,9 @@ spec:
     addon:
       argocdNamespace: argocd
       projectPrefix: registry-
-      valuesAddon: registry-platform
+      # Метка addons.in-cloud.io/addon слоёв order и site, которые ставит чарт
+      # registry-platform (его addonName).
+      valuesAddon: registry-instance
     route:
       gatewayNamespace: registry-edge
       gatewayName: registry-gw

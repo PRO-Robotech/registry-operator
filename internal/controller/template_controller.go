@@ -244,8 +244,12 @@ func (r *RegistryTemplateReconciler) Reconcile(ctx context.Context, req ctrl.Req
 			return ctrl.Result{}, err
 		}
 	}
-	if _, err := render.StrictYAMLMap([]byte(rt.Spec.Params)); err != nil {
+	params, err := render.StrictYAMLMap([]byte(rt.Spec.Params))
+	if err != nil {
 		return ctrl.Result{}, r.setAccepted(ctx, rt, false, registryv1alpha1.ReasonTemplateInvalid, "params: "+err.Error())
+	}
+	if err := policy.CheckTemplateParams(params); err != nil {
+		return ctrl.Result{}, r.setAccepted(ctx, rt, false, registryv1alpha1.ReasonTemplateInvalid, err.Error())
 	}
 	for _, k := range observedKinds {
 		ref := k.ref(rt.Spec.Templates)

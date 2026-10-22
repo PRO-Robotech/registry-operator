@@ -277,7 +277,14 @@ func (r *RegistryReconciler) resolveTemplates(ctx context.Context, reg *registry
 			return err
 		}
 		if !obj.GetDeletionTimestamp().IsZero() || !accepted(obj, conds()) {
-			return &waiting{reason: registryv1alpha1.ReasonTemplateNotAccepted, msg: fmt.Sprintf("%T %s is not accepted", obj, name)}
+			msg := fmt.Sprintf("%T %s is not accepted", obj, name)
+			// Отказ принятия называет причину (параметр ревизии, функция
+			// шаблона): диагностика заказа несёт её, а не одно «не принят».
+			if c := meta.FindStatusCondition(conds(), registryv1alpha1.ConditionAccepted); c != nil &&
+				c.Status == metav1.ConditionFalse && c.ObservedGeneration == obj.GetGeneration() && c.Message != "" {
+				msg += ": " + c.Message
+			}
+			return &waiting{reason: registryv1alpha1.ReasonTemplateNotAccepted, msg: msg}
 		}
 		return nil
 	}

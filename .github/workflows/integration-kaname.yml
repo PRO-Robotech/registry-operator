@@ -9,10 +9,7 @@ name: integration-kaname
 # стенда и посевы (человек полосы входа, его церемония).
 #
 # Манифест модуля registry — charts/registry-platform/files/registry.manifest.yaml
-# ЭТОГО дерева. Пока чарт площадки живёт в ветке полосы чарта и в дерево не
-# сведён, манифест берётся из ветки REGOP_IT_MANIFEST_REF этого же
-# репозитория; дерево, в котором манифест есть, при названной ветке —
-# отказ: подмена, которой нечего подменять, снимается вместе с REGOP_IT_MANIFEST_REF.
+# ЭТОГО дерева и только его: дерево без манифеста — условие не создано.
 #
 # Условие не создано (нет образа, манифеста, стенда, посева) — прогон НЕ
 # ВЫПОЛНИЛСЯ: шаг называет недостающее аннотацией и завершается отказом — это
@@ -39,7 +36,6 @@ jobs:
     env:
       KANAME_REF: 93ad1b885469c79f284b9fc629f86fe3dde81a97
       KANAME_IMAGE: prorobotech/kaname:main-93ad1b88
-      REGOP_IT_MANIFEST_REF: 4-chart
       MANIFEST_PATH: charts/registry-platform/files/registry.manifest.yaml
       KANAME_STAND_ALERT_RULES: "off"
       KANAME_STAND_CLUSTER: regop-it-kaname
@@ -49,8 +45,6 @@ jobs:
       REGOP_IT_RELEASE: kaname
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Conditions (kaname image, the module manifest)
         id: cond
@@ -59,17 +53,10 @@ jobs:
           docker manifest inspect "$KANAME_IMAGE" >/dev/null 2>&1 || missing="$missing; image $KANAME_IMAGE is not published"
           manifest="$RUNNER_TEMP/registry.manifest.yaml"
           if [ -s "$MANIFEST_PATH" ]; then
-            if [ -n "$REGOP_IT_MANIFEST_REF" ]; then
-              echo "::error title=EXPIRED::$MANIFEST_PATH is in this tree; REGOP_IT_MANIFEST_REF=$REGOP_IT_MANIFEST_REF has nothing to substitute — remove it"
-              exit 1
-            fi
             cp "$MANIFEST_PATH" "$manifest"
             echo "manifest: this tree"
-          elif [ -n "$REGOP_IT_MANIFEST_REF" ] && git fetch -q origin "$REGOP_IT_MANIFEST_REF" \
-              && git show "FETCH_HEAD:$MANIFEST_PATH" > "$manifest" 2>/dev/null && [ -s "$manifest" ]; then
-            echo "manifest: $REGOP_IT_MANIFEST_REF @ $(git rev-parse FETCH_HEAD)"
           else
-            missing="$missing; no registry module manifest in this tree nor in ${REGOP_IT_MANIFEST_REF:-<no ref>}"
+            missing="$missing; no registry module manifest $MANIFEST_PATH in this tree"
           fi
           if [ -n "$missing" ]; then
             echo "::error title=NOT EXECUTED::${missing#; } — no verdict about the tree"
