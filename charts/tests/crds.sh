@@ -45,7 +45,7 @@ appprojects.yaml   $ARGO/appproject-crd.yaml                              7b9933
 applications.yaml  $ARGO/application-crd.yaml                             ea5e7cf5facd3ed70fe25acb048a495e5f2f893bfc961a02de5cb741b9d630f6
 vaultclaims.yaml   $VAULT/vault.in-cloud.io_vaultclaims.yaml              90be123ccf05dd479088db706100f777bb86a3b5b72343debe99e1cf32f76ab5
 s3bucketclaims.yaml $VAULT/vault.in-cloud.io_s3bucketclaims.yaml          5e1dcd01aaf313f4c1c0c9d24826fc0833ad596729cef6da75946aece525fd8e
-iam-serviceaccounts.yaml $IAM/iam.kaname.in-cloud.io_iamserviceaccounts.yaml eefe92ee2796d004dc5b6f6f53e0fcb43fa6c211ae752d7072b637b101117425
-iam-accessbindings.yaml $IAM/iam.kaname.in-cloud.io_iamaccessbindings.yaml   e1fba60e7dccda1388449093e0de6061e24ea084e1eafc1f8725991c1d135ba8
+iamserviceaccounts.yaml $IAM/iam.kaname.in-cloud.io_iamserviceaccounts.yaml eefe92ee2796d004dc5b6f6f53e0fcb43fa6c211ae752d7072b637b101117425
+iamaccessbindings.yaml $IAM/iam.kaname.in-cloud.io_iamaccessbindings.yaml   e1fba60e7dccda1388449093e0de6061e24ea084e1eafc1f8725991c1d135ba8
 EOF
 echo "crds: $(ls "$dir" | wc -l) files verified"
