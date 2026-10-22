@@ -30,7 +30,7 @@ type Order struct {
 	UID   string
 	// SyncEpoch — эпоха синхронизации рабочей нагрузки.
 	SyncEpoch int64
-	// ServiceAccountName — имя iam ServiceAccount заказа (субъект выдачи).
+	// ServiceAccountName — имя IAMServiceAccount заказа (субъект выдачи).
 	ServiceAccountName string
 	// RouteNamespace — namespace маршрута заказа.
 	RouteNamespace string

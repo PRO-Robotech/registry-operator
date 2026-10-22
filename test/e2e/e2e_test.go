@@ -156,8 +156,8 @@ func TestE2E_OrderThroughTheWholePipelineAndBack(t *testing.T) {
 
 	// CRD: свои и целевые (закреплённые hack/crds.lock).
 	sh(t, nil, "kubectl", "apply", "--server-side", "-f", "config/crd/bases")
-	for _, f := range []string{"vault.in-cloud.io_s3bucketclaims.yaml", "vault.in-cloud.io_vaultclaims.yaml", "iam.kaname.in-cloud.io_serviceaccounts.yaml",
-		"iam.kaname.in-cloud.io_accessbindings.yaml", "addons.in-cloud.io_addons.yaml", "gateway-api-standard-install.yaml"} {
+	for _, f := range []string{"vault.in-cloud.io_s3bucketclaims.yaml", "vault.in-cloud.io_vaultclaims.yaml", "iam.kaname.in-cloud.io_iamserviceaccounts.yaml",
+		"iam.kaname.in-cloud.io_iamaccessbindings.yaml", "addons.in-cloud.io_addons.yaml", "gateway-api-standard-install.yaml"} {
 		sh(t, nil, "kubectl", "apply", "--server-side", "-f", filepath.Join(crds, f))
 	}
 	sh(t, nil, "kubectl", "wait", "--for=condition=Established", "crd", "--all", "--timeout=120s")

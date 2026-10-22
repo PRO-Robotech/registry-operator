@@ -25,8 +25,8 @@ func Cond(typ, status string, gen int64) map[string]any {
 var (
 	s3BucketClaim  = schema.GroupKind{Group: "vault.in-cloud.io", Kind: "S3BucketClaim"}
 	vaultClaim     = schema.GroupKind{Group: "vault.in-cloud.io", Kind: "VaultClaim"}
-	serviceAccount = schema.GroupKind{Group: "iam.kaname.in-cloud.io", Kind: "ServiceAccount"}
-	accessBinding  = schema.GroupKind{Group: "iam.kaname.in-cloud.io", Kind: "AccessBinding"}
+	serviceAccount = schema.GroupKind{Group: "iam.kaname.in-cloud.io", Kind: "IAMServiceAccount"}
+	accessBinding  = schema.GroupKind{Group: "iam.kaname.in-cloud.io", Kind: "IAMAccessBinding"}
 	addon          = schema.GroupKind{Group: "addons.in-cloud.io", Kind: "Addon"}
 	httpRoute      = schema.GroupKind{Group: "gateway.networking.k8s.io", Kind: "HTTPRoute"}
 )

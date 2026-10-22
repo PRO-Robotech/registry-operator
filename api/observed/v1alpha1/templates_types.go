@@ -99,7 +99,7 @@ func (t *ObservedVaultClaimTemplate) TemplateStatus() *registryv1alpha1.Template
 }
 
 // ----------------------------------------------------------------------------
-// ServiceAccount (iam.kaname.in-cloud.io/v1alpha1), шаг identity.
+// IAMServiceAccount (iam.kaname.in-cloud.io/v1alpha1), шаг identity.
 
 // ObservedIamServiceAccountTemplateSpec — неизменяемая ревизия шаблона
 // учётки CI-робота.
@@ -120,7 +120,7 @@ type ObservedIamServiceAccountTemplateSpec struct {
 // +kubebuilder:printcolumn:name="Accepted",type=string,JSONPath=`.status.conditions[?(@.type=="Accepted")].status`
 // +kubebuilder:validation:XValidation:rule="self.metadata.name == self.spec.templateName + '-' + self.spec.version",message="metadata.name must be <templateName>-<version>"
 
-// ObservedIamServiceAccountTemplate — шаблон spec iam ServiceAccount заказа.
+// ObservedIamServiceAccountTemplate — шаблон spec IAMServiceAccount заказа.
 type ObservedIamServiceAccountTemplate struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -148,7 +148,7 @@ func (t *ObservedIamServiceAccountTemplate) TemplateStatus() *registryv1alpha1.T
 }
 
 // ----------------------------------------------------------------------------
-// AccessBinding (iam.kaname.in-cloud.io/v1alpha1), шаг access.
+// IAMAccessBinding (iam.kaname.in-cloud.io/v1alpha1), шаг access.
 
 // ObservedIamAccessBindingTemplateSpec — неизменяемая ревизия шаблона
 // выдачи роли.
@@ -170,7 +170,7 @@ type ObservedIamAccessBindingTemplateSpec struct {
 // +kubebuilder:printcolumn:name="Accepted",type=string,JSONPath=`.status.conditions[?(@.type=="Accepted")].status`
 // +kubebuilder:validation:XValidation:rule="self.metadata.name == self.spec.templateName + '-' + self.spec.version",message="metadata.name must be <templateName>-<version>"
 
-// ObservedIamAccessBindingTemplate — шаблон spec iam AccessBinding заказа.
+// ObservedIamAccessBindingTemplate — шаблон spec IAMAccessBinding заказа.
 type ObservedIamAccessBindingTemplate struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

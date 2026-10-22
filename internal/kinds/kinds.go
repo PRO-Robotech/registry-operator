@@ -52,8 +52,8 @@ var (
 	}
 	IamServiceAccount = Kind{
 		Step:       registryv1alpha1.StepIdentity,
-		GVK:        schema.GroupVersionKind{Group: "iam.kaname.in-cloud.io", Version: "v1alpha1", Kind: "ServiceAccount"},
-		Resource:   "serviceaccounts",
+		GVK:        schema.GroupVersionKind{Group: "iam.kaname.in-cloud.io", Version: "v1alpha1", Kind: "IAMServiceAccount"},
+		Resource:   "iamserviceaccounts",
 		Namespaced: true,
 		StatusKey:  "IamServiceAccount",
 		Ready:      iamServiceAccountReady,
@@ -69,8 +69,8 @@ var (
 	}
 	IamAccessBinding = Kind{
 		Step:       registryv1alpha1.StepAccess,
-		GVK:        schema.GroupVersionKind{Group: "iam.kaname.in-cloud.io", Version: "v1alpha1", Kind: "AccessBinding"},
-		Resource:   "accessbindings",
+		GVK:        schema.GroupVersionKind{Group: "iam.kaname.in-cloud.io", Version: "v1alpha1", Kind: "IAMAccessBinding"},
+		Resource:   "iamaccessbindings",
 		Namespaced: true,
 		StatusKey:  "IamAccessBinding",
 		Ready:      iamAccessBindingReady,

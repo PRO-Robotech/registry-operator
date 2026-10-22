@@ -1,5 +1,5 @@
 apiVersion: iam.kaname.in-cloud.io/v1alpha1
-kind: ServiceAccount
+kind: IAMServiceAccount
 metadata:
   name: zot-abc123-ci
   namespace: cust01
