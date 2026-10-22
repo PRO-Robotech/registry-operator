@@ -53,7 +53,8 @@ spec:
 # Source: registry-instance/templates/deployment.yaml
 # zot слушает только 127.0.0.1:5000 и хранит данные только в S3; снаружи пода
 # доступен лишь iam-proxy: он проверяет JWT клиента и спрашивает право публичным
-# AuthorizeService.Check токеном самого клиента «о себе» — своих прав в IAM у прокси нет.
+# AuthorizeService.Check (REST-фронт kaname) токеном самого клиента «о себе» — своих прав в
+# IAM у прокси нет.
 # config.json zot рендерит init vault-agent до старта zot (повторяет, пока лист с
 # ключами бакета не появится); ключи видит только контейнер zot. Сетевая политика
 # пода — волной раньше.
@@ -165,8 +166,7 @@ spec:
             - "--jwks-ca=/etc/registry/ca/ca.crt"
             - "--issuer=https://kaname.example.test"
             - "--audience=registry"
-            - "--kaname-address=kaname.example.test:9090"
-            - "--kaname-server-name=kaname.example.test"
+            - "--kaname-url=https://kaname.example.test:8443"
             - "--kaname-ca=/etc/registry/ca/ca.crt"
             - "--check-timeout=2s"
             - "--cache-ttl=10s"
@@ -174,8 +174,6 @@ spec:
             - "--enroll-ca=/etc/registry/ca/ca.crt"
             - "--enroll-token-file=/var/run/secrets/registry-operator/token"
             - "--enroll-timeout=15s"
-            - "--realm=https://registry.example.test/iam/token"
-            - "--service=registry.example.test"
           ports:
             - name: proxy
               containerPort: 8080
@@ -331,7 +329,7 @@ spec:
         - matchName: "kaname.example.test"
       toPorts:
         - ports:
-            - port: "9090"
+            - port: "8443"
               protocol: TCP
             - port: "9097"
               protocol: TCP

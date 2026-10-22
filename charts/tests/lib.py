@@ -365,8 +365,14 @@ def cmd_probe_platform(render, mode):
     # Публичность — один механизм, флаг --public iam-proxy: выдач kaname с системными
     # классами anonymous и authenticated платформа не рендерит и не разрешает.
     p.check("AccessBinding" not in kinds, f"no AccessBinding is rendered, got {kinds.get('AccessBinding')}")
-    text_all = yaml.safe_dump_all(ds)
-    p.check("systemClass" not in text_all, "no subject of a system class anywhere in the render")
+    # Слово systemClass законно лишь в отказе V1 (`!has(s.systemClass)`): вне политик допуска
+    # его нет нигде, а в политиках каждое вхождение — отрицание.
+    text_rest = yaml.safe_dump_all([d for d in ds if d["kind"] != "ValidatingAdmissionPolicy"])
+    p.check("systemClass" not in text_rest, "no subject of a system class anywhere in the render outside admission policies")
+    vap_exprs = [v["expression"] for d in ds if d["kind"] == "ValidatingAdmissionPolicy"
+                 for v in d["spec"].get("validations", []) + d["spec"].get("matchConditions", []) + d["spec"].get("variables", [])]
+    bare = [e for e in vap_exprs if e.count("systemClass") != e.count("!has(s.systemClass)")]
+    p.check(not bare, f"admission policies name a system class only to refuse it, got {bare}")
     cm, m = manifest_of(ds)
     p.check(cm is not None, "kaname module manifest of registry is rendered")
     if cm is not None:
