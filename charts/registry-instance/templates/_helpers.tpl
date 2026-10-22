@@ -92,10 +92,10 @@ registry.in-cloud.io/id: {{ .Values.instance.id | toJson }}
 */}}
 {{- define "ri.zotConfigTemplate" -}}
 {{- $s := .Values.storage -}}
-{{- $driver := dict "name" "s3" "rootdirectory" "/zot" "secure" true "forcepathstyle" true "region" $s.region "regionendpoint" $s.endpoint "bucket" $s.bucket "accesskey" "@@ACCESS_KEY@@" "secretkey" "@@SECRET_KEY@@" -}}
+{{- $driver := dict "name" "s3" "rootdirectory" "/zot" "secure" true "forcepathstyle" true "region" (include "ri.noBraces" $s.region) "regionendpoint" (include "ri.noBraces" $s.endpoint) "bucket" (include "ri.noBraces" $s.bucket) "accesskey" "@@ACCESS_KEY@@" "secretkey" "@@SECRET_KEY@@" -}}
 {{- $storage := dict "rootDirectory" "/var/lib/zot" "dedupe" false "remoteCache" false "gc" true "storageDriver" $driver -}}
 {{- $cfg := dict "distSpecVersion" "1.1.1" "http" (dict "address" "127.0.0.1" "port" "5000") "log" (dict "level" "info") "storage" $storage -}}
-{{- $json := $cfg | toJson | include "ri.noBraces" -}}
+{{- $json := $cfg | toJson -}}
 {{- $json = replace "\"@@ACCESS_KEY@@\"" "{{ .Data.data.accessKey | toJSON }}" $json -}}
 {{- $json = replace "\"@@SECRET_KEY@@\"" "{{ .Data.data.secretKey | toJSON }}" $json -}}
 {{- printf "{{- with secret %q -}}%s{{- end -}}" (include "ri.noBraces" .Values.vault.secretPath) $json -}}
