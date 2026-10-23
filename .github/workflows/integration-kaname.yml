@@ -132,6 +132,43 @@ jobs:
         run: |
           rc=0
           .github/scripts/stand-chart.sh up || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            python3 - <<'OWNDIAG' || echo "OWN_POD_DIAGNOSTIC unavailable; original stand rc retained"
+          import json, subprocess, re
+          
+          def call(argv):
+              p=subprocess.run(argv,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=25)
+              if p.returncode: raise RuntimeError('read failed: '+argv[0])
+              return json.loads(p.stdout)
+          
+          def safe(s):
+              s=re.sub(r'[\x00-\x1f\x7f]', ' ', str(s))[:1200]
+              s=re.sub(r'(?i)(token|password|secret|authorization)([=: ]+)[^ ]+',r'\1\2[redacted]',s)
+              return s
+          
+          base=['kubectl','--context','kind-regop-it-kaname','--request-timeout=20s','-n','kaname']
+          dep=call(base+['get','deployment','kaname','-o','json'])
+          uid=dep['metadata']['uid']
+          rss=call(base+['get','replicasets','-o','json'])['items']
+          owned={x['metadata']['uid'] for x in rss if any(o.get('uid')==uid and o.get('kind')=='Deployment' for o in x['metadata'].get('ownerReferences',[]))}
+          pods=call(base+['get','pods','-o','json'])['items']
+          selected=[p for p in pods if any(o.get('uid') in owned and o.get('kind')=='ReplicaSet' for o in p['metadata'].get('ownerReferences',[]))]
+          assert selected, 'no owned Kaname pod'
+          for p in selected:
+              name=p['metadata']['name']; puid=p['metadata']['uid']
+              fresh=call(base+['get','pod',name,'-o','json']); assert fresh['metadata']['uid']==puid
+              states=[]
+              for c in fresh.get('status',{}).get('initContainerStatuses',[])+fresh.get('status',{}).get('containerStatuses',[]):
+                  state=c.get('state',{}); detail=state.get('waiting') or state.get('terminated') or {}
+                  states.append({'name':c['name'],'state':list(state),'reason':safe(detail.get('reason','')),'message':safe(detail.get('message','')),'exitCode':detail.get('exitCode'),'image':c.get('image'),'imageID':c.get('imageID')})
+              events=call(base+['get','events','--field-selector','involvedObject.uid='+puid,'-o','json'])['items']
+              print('OWN_POD_DIAGNOSTIC '+json.dumps({'deploymentUID':uid,'podUID':puid,'name':name,'node':fresh['spec'].get('nodeName'),'states':states,'events':[{'reason':safe(e.get('reason','')),'message':safe(e.get('message','')),'count':e.get('count'),'lastTimestamp':e.get('lastTimestamp')} for e in events if e.get('involvedObject',{}).get('uid')==puid]},sort_keys=True),flush=True)
+          node='regop-it-kaname-control-plane'
+          info=call(['docker','exec',node,'crictl','images','-o','json'])
+          images=[{'id':x.get('id'),'repoTags':x.get('repoTags'),'repoDigests':x.get('repoDigests'),'size':x.get('size')} for x in info.get('images',[]) if any('prorobotech/kaname' in s for s in x.get('repoTags',[])+x.get('repoDigests',[]))]
+          print('OWN_NODE_IMAGE_METADATA '+json.dumps({'node':node,'images':images},sort_keys=True),flush=True)
+          OWNDIAG
+          fi
           case "$rc" in
             0) ;;
             75) echo "::error title=NOT EXECUTED::the kaname stand did not come up — no verdict about the tree"; exit 1 ;;
