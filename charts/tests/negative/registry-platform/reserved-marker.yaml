@@ -1,0 +1,4 @@
+# Близнец: platform-default. Меняется один факт: значение несёт зарезервированную метку подстановки.
+# expect: reserved marker "zzph-"
+addon:
+  pluginName: zzph-release

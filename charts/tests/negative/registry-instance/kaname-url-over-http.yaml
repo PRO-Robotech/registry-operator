@@ -1,0 +1,5 @@
+# Близнец: базовая площадка. Меняется один факт: Check kaname без TLS.
+# expect: at '/site/kaname/url'
+site:
+  kaname:
+    url: http://kaname.example.test:8443

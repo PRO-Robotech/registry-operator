@@ -1,0 +1,34 @@
+# Роль Vault на k8s ServiceAccount zot-<id> (гостевой режим vault-operator:
+# существующий mount площадки, только своя роль и своя политика листа).
+# Политика читает ровно лист своей учётки: путь называет учётку подстановками
+# {serviceAccountNamespace}/{serviceAccountName}, а не именем заказа.
+apiVersion: observed.registry.in-cloud.io/v1alpha1
+kind: ObservedVaultClaimTemplate
+metadata:
+  name: zot-vault-v1
+spec:
+  templateName: zot-vault
+  version: v1
+  value: |
+    vaultConfigRef:
+      name: {{ .Params.secrets.vaultConfig | toJson }}
+    secretsPrefix: {{ printf "%s/%s" .Params.secrets.secretsPrefix .ID | toJson }}
+    auth:
+      mountPath: {{ .Params.secrets.authMount | toJson }}
+      manageConfig: false
+      autoCreate: false
+      rolePruning: Owned
+    policies:
+    - name: {{ printf "zot-%s-leaf" .ID | toJson }}
+      identityPaths:
+      - path: {{ printf "%s/data/%s/%s/namespaces/{serviceAccountNamespace}/apps/docker-registry/{serviceAccountName}" .Params.secrets.kvMount .Params.secrets.secretsPrefix .ID | toJson }}
+        capabilities: [read]
+    roles:
+    - name: {{ printf "zot-%s" .ID | toJson }}
+      boundServiceAccounts:
+        names: [{{ printf "zot-%s" .ID | toJson }}]
+        namespace: {{ .Login | toJson }}
+      policies: [{{ printf "zot-%s-leaf" .ID | toJson }}]
+      audience: {{ .Params.secrets.audience | toJson }}
+      tokenType: service
+      tokenTTL: 1h

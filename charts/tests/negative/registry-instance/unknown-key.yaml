@@ -1,0 +1,4 @@
+# Близнец: базовый заказ abc123. Меняется один факт: ключ, которого нет в контракте.
+# expect: additional properties 'persistence' not allowed
+persistence:
+  enabled: true

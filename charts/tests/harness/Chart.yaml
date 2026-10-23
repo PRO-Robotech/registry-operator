@@ -1,0 +1,9 @@
+apiVersion: v2
+name: layer-harness
+description: >-
+  Probe harness, not a product chart: executes a text that addons-operator would
+  execute (an AddonValue layer or an AddonTemplate) with the same context keys —
+  .Variables for a layer, .Values and .Vars for an Addon template — and the same
+  template library (Go text/template with sprig).
+type: application
+version: 0.0.0

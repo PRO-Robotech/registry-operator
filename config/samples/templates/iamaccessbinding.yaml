@@ -1,0 +1,21 @@
+# Выдача registry.pusher учётке CI-робота на реестр заказа.
+apiVersion: observed.registry.in-cloud.io/v1alpha1
+kind: ObservedIamAccessBindingTemplate
+metadata:
+  name: zot-pusher-v1
+spec:
+  templateName: zot-pusher
+  version: v1
+  nameSuffix: -ci-pusher
+  value: |
+    subjects:
+    - serviceAccountRef:
+        name: {{ .Status.IamServiceAccount.Name | toJson }}
+    roleRef:
+      name: registry.pusher
+    scope:
+      type: iam.project
+    target:
+      resources:
+      - type: registry.registries
+        id: {{ .ID | toJson }}

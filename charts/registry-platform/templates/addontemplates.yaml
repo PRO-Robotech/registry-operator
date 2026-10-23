@@ -1,0 +1,55 @@
+{{- /*
+Шаблон Addon собирается так: статическая часть платформы печатается toYaml и
+проверяется rp.inertValues, затем метки-заглушки zzph-* заменяются фиксированными
+действиями шаблона над .Vars. Данные платформы заглушек не содержат (проверка ниже),
+поэтому исполняемый текст появляется только из этого файла.
+*/}}
+{{- $a := .Values.addon }}
+{{- $b := $a.backend }}
+{{- if contains "zzph-" (list $a .Values.instanceChart .Values.addonName | toJson) }}
+{{- fail "addon and instanceChart values must not contain the reserved marker \"zzph-\"" }}
+{{- end }}
+{{- $selectors := list (dict "name" "order" "priority" 0 "matchLabels" (dict "addons.in-cloud.io/addon" .Values.addonName "addons.in-cloud.io/values" "order")) (dict "name" "site" "priority" 10 "matchLabels" (dict "addons.in-cloud.io/addon" .Values.addonName "addons.in-cloud.io/values" "site")) }}
+{{- $backend := dict "type" "argocd" "namespace" $b.namespace "finalizer" true "project" "zzph-project" "syncPolicy" (dict "automated" (dict "prune" true "selfHeal" true) "syncOptions" $b.syncPolicy.syncOptions "retry" $b.syncPolicy.retry) }}
+{{- $vars := include "rp.orderVariables" . | fromJsonArray }}
+{{- $variables := dict }}
+{{- range $vars }}
+{{- $_ := set $variables . (printf "zzph-var-%s" .) }}
+{{- end }}
+{{- $project := printf "{{ %s | toJson }}" ($b.project | toJson) }}
+{{- if eq $b.projectMode "tenant" }}
+{{- $project = printf "{{ printf \"%%s%%s\" %s (.Vars.login | toString) | toJson }}" ($b.projectPrefix | toJson) }}
+{{- end }}
+{{- $seen := dict }}
+{{- range $pin := .Values.instanceChart.pins }}
+{{- if hasKey $seen $pin.version }}
+{{- fail (printf "instanceChart.pins: version %q is pinned twice" $pin.version) }}
+{{- end }}
+{{- $_ := set $seen $pin.version true }}
+{{- $spec := dict "chart" $.Values.instanceChart.name "repoURL" $.Values.instanceChart.repoURL "version" $pin.version "targetCluster" $a.targetCluster "targetNamespace" "zzph-namespace" "releaseName" "zzph-release" "backend" $backend "valuesSelectors" $selectors "variables" $variables }}
+{{- with $a.pluginName }}{{ $_ := set $spec "pluginName" . }}{{ end }}
+{{- $text := dict "spec" $spec | toYaml | include "rp.inertValues" }}
+{{- $text = replace "zzph-project" $project $text }}
+{{- $text = replace "zzph-namespace" "{{ .Vars.login | toString | toJson }}" $text }}
+{{- $text = replace "zzph-release" "{{ printf \"zot-%s\" (.Vars.id | toString) | toJson }}" $text }}
+{{- range $vars }}
+{{- $text = replace (printf "zzph-var-%s" .) (printf "{{ .Vars.%s | toString | toJson }}" .) $text }}
+{{- end }}
+---
+# Форма Addon заказа для версии {{ $pin.version }} чарта registry-instance. Её рендерит
+# addons-operator из AddonClaim и registry-operator — тем же контекстом ({.Values,
+# .Vars}, missingkey=error): версия, репозиторий и digest закреплены здесь, шаблон
+# заказа их не пишет. Переменные — ровно перечень слоя заказа.
+apiVersion: addons.in-cloud.io/v1alpha1
+kind: AddonTemplate
+metadata:
+  name: {{ printf "%s-%s" $.Values.instanceChart.name $pin.version | toJson }}
+  labels:
+    {{- include "rp.labels" $ | nindent 4 }}
+    registry.in-cloud.io/chart: {{ $.Values.instanceChart.name | toJson }}
+    registry.in-cloud.io/chart-version: {{ $pin.version | toJson }}
+  annotations:
+    registry.in-cloud.io/chart-digest: {{ $pin.digest | toJson }}
+spec:
+  template: {{ $text | toJson }}
+{{- end }}

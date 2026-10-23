@@ -1,0 +1,20 @@
+apiVersion: v2
+name: registry-platform
+description: >-
+  Platform objects of on-demand registries, installed once per cluster: the
+  addons-operator template and value layers of the registry-instance chart,
+  the platform phase, the edge Gateway, the shared edge routes and the kaname
+  module manifest of registry; and, off by default, the admission policies and
+  the per-tenant Argo CD projects.
+type: application
+version: 1.0.1
+appVersion: "1.0.0"
+kubeVersion: ">=1.30.0-0"
+home: https://github.com/PRO-Robotech/registry-operator
+sources:
+  - https://github.com/PRO-Robotech/registry-operator/tree/main/charts/registry-platform
+keywords:
+  - registry
+  - addons
+annotations:
+  artifacthub.io/license: Apache-2.0

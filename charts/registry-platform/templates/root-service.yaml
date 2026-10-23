@@ -1,0 +1,26 @@
+{{- if and .Values.sharedRoutes.enabled .Values.sharedRoutes.apiRoot.privatePool }}
+{{- $group := required "private root pool requires site.routingGroup" .Values.site.routingGroup }}
+{{- $b := .Values.sharedRoutes.apiRoot.backend }}
+---
+# Корень протокола принадлежит площадке, не заказу Registry. Публичные Pods исключены.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $b.name | toJson }}
+  namespace: {{ $b.namespace | toJson }}
+  labels:
+    {{- include "rp.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: zot
+    app.kubernetes.io/part-of: registry
+    app.kubernetes.io/component: workload
+    app.kubernetes.io/managed-by: registry-operator
+    registry.in-cloud.io/routing-group: {{ $group | toJson }}
+    registry.in-cloud.io/root-membership: private
+  ports:
+    - name: proxy
+      port: {{ $b.port | int }}
+      targetPort: proxy
+      protocol: TCP
+{{- end }}

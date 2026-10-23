@@ -1,0 +1,6 @@
+# Близнец: базовая площадка. Меняется один факт: токен заявки на регистрацию с аудиторией
+# Vault — один токен годился бы обоим пирам.
+# expect: must differ
+site:
+  registryOperator:
+    tokenAudience: vault

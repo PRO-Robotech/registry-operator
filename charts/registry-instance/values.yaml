@@ -1,0 +1,134 @@
+# Чарт ставит ровно zot одного регистри с прокси прав iam-proxy: ServiceAccount, сетевую
+# политику пода, Service, Deployment и ReferenceGrant маршрута заказа к Service. Бакет, роль Vault, учётку и выдачу kaname, кортеж
+# ресурса и маршрут края заводит и ведёт registry-operator сам; сюда он передаёт только
+# пути к ним — через Addon.spec.variables и слой заказа платформы (README.md, «Контракт»).
+#
+# Обязательное здесь пусто: рендер без слоя заказа и слоя площадки отказывает по
+# values.schema.json, молчаливых умолчаний нет.
+
+# Заказ Registry: пишет registry-operator (слой заказа, priority 0).
+instance:
+  # id заказа: ^[a-z0-9]{6,20}$, не начинается с «reg»; неизменяем.
+  id: ""
+  # login — metadata.namespace заказа Registry (namespace арендатора).
+  login: ""
+  # uid заказа Registry: метка owner-uid на каждом объекте.
+  registryUID: ""
+  # Эпоха синхронизации: оператор увеличивает её, чтобы Argo CD повторил исчерпанную
+  # синхронизацию (источник Application меняется). В объекты не печатается.
+  syncEpoch: 0
+  # Registry.spec.public: true — pull без токена; push и прочее — только с токеном.
+  public: false
+
+# Бакет заказа: значения из S3BucketClaim (status.bucketName, status.endpoint, spec.region).
+storage:
+  bucket: ""
+  # Только https: zot ходит в S3 с TLS.
+  endpoint: ""
+  region: ""
+
+# Vault заказа: значения из VaultClaim и S3BucketClaim, которые ведёт оператор.
+vault:
+  # Полный путь чтения листа KV v2 с ключами бакета:
+  # <kvMount>/data/<secretsPrefix>/namespaces/<login>/apps/docker-registry/zot-<id>.
+  secretPath: ""
+  # Существующий mount kubernetes-auth (без «auth/»).
+  authMount: ""
+  # Роль на этом mount; равна zot-<id>.
+  role: ""
+
+# Константы площадки: слой площадки платформы (priority 10).
+site:
+  # Необязательная routingGroup: DNS label площадки для одного host/authority.
+  # Задаётся только площадкой; общий private root выбирает Pods этой группы.
+  # ConfigMap в namespace заказа с CA, которым подписаны Vault, публичный API kaname и
+  # эндпоинт регистрации registry-operator (раздаёт платформа).
+  caBundle:
+    configMap: ""
+    key: ca.crt
+  vault:
+    # Адрес Vault для vault-agent; только https.
+    address: ""
+    # Аудитория projected-токена SA пода для входа vault-agent; равна audience роли.
+    tokenAudience: vault
+    # Метки выбора инжектора площадки: только Pod, без подмены встроенных меток.
+    injectorLabels: {}
+  kaname:
+    # Standalone Kaname public REST (https://host[:port] без пути): opaque WhoAmI + self Check, без Kacho gateway.
+    # токеном клиента «о себе»; внутренний листенер :9091 схема отвергает.
+    url: ""
+    # Набор ключей kaname (JWKS); только https.
+    jwksURL: ""
+    # iss токенов kaname, которые принимает прокси.
+    issuer: ""
+    # aud токенов kaname, которые принимает прокси.
+    audience: registry
+  registryOperator:
+    # Эндпоинт регистрации нового репозитория (registry-operator): https://host[:port]
+    # без пути — путь заявки iam-proxy дописывает сам.
+    registrationURL: ""
+    # Аудитория projected-токена SA пода, которым прокси входит в эндпоинт регистрации;
+    # registry-operator проверяет её через TokenReview.
+    tokenAudience: registry-operator
+  iamProxy:
+    # Срок кэша JWT Check по (хэш токена, объект, глагол): 1s–10s; opaque без кэша.
+    decisionCacheTTL: ""
+    # Дедлайн каждого WhoAmI / Check: 1s–30s.
+    checkTimeout: ""
+    # Дедлайн одной заявки на регистрацию: 1s–60s.
+    enrollTimeout: ""
+  images:
+    zot:
+      repository: ghcr.io/project-zot/zot-linux-amd64
+      tag: v2.1.20
+      digest: sha256:95a837a0afacf5b7edc0c92493f04beee6891989b8d2fd50a00cf65a1e6d4fd5
+    iamProxy:
+      repository: docker.io/prorobotech/registry-iam-proxy
+      tag: ""
+      digest: ""
+  edge:
+    # namespace маршрутов края: там registry-operator ставит маршрут заказа /v2/<id>/, и
+    # только его HTTPRoute ReferenceGrant zot-<id> пускает к Service zot-<id>.
+    routeNamespace: ""
+    # Прокси Envoy Gateway своего Gateway — единственный сетевой источник входа в под.
+    proxy:
+      namespace: ""
+      gateway:
+        name: ""
+        namespace: ""
+  network:
+    # true — разрешить вход kubelet (entity host) на порт проб :8081.
+    # Нужен там, где политика узла не пропускает пробы сама; по умолчанию закрыт.
+    allowKubeletProbes: false
+    dns:
+      namespace: ""
+      labels: {}
+    # Пиры выхода: {fqdn, ports} | {namespace, labels, ports} | {cidr, ports}.
+    # Выход в S3 выводится из storage.endpoint и здесь не задаётся.
+    vault: []
+    # Публичный REST-фронт kaname (Check) и JWKS; внутренний листенер :9091 запрещён.
+    kaname: []
+    # Эндпоинт регистрации registry-operator.
+    registryOperator: []
+  resources:
+    zot:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        memory: 1Gi
+    iamProxy:
+      requests:
+        cpu: 20m
+        memory: 32Mi
+      limits:
+        memory: 128Mi
+    vaultAgent:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        cpu: 100m
+        memory: 64Mi
+    # Временное zot (метаданные, загрузки до выгрузки в S3); данные — только в S3.
+    scratchSizeLimit: 2Gi

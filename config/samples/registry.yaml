@@ -1,0 +1,11 @@
+# Заказ регистри abc123 арендатора cust01.
+apiVersion: registry.in-cloud.io/v1alpha1
+kind: Registry
+metadata:
+  name: abc123
+  namespace: cust01
+spec:
+  id: abc123
+  templateRef:
+    name: zot-service
+    version: v1

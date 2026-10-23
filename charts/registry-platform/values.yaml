@@ -1,0 +1,154 @@
+# Объекты платформы для регистри по заказу. Ставятся один раз на кластер.
+# registry-operator их не создаёт: на заказ он пишет только свои ресурсы (бакет, роль
+# Vault, учётку, выдачу и кортеж kaname, маршрут) и Addon zot, а Addon выбирает слои
+# AddonValue этого чарта по меткам. Обязательное включено по умолчанию; «пока без» — политики
+# допуска и AppProject на арендатора (выключены).
+
+# Значение метки addons.in-cloud.io/addon у слоёв; его же выбирают valuesSelectors
+# каждого Addon заказа.
+addonName: registry-instance
+
+# Чарт экземпляра. Версия закрепляется вместе с digest публикации: на каждую
+# опубликованную версию — свой AddonTemplate registry-instance-<version>, digest — в
+# аннотации registry.in-cloud.io/chart-digest; registry-operator пишет Addon, только
+# если тег версии в реестре разрешается ровно в этот digest.
+instanceChart:
+  repoURL: oci://ghcr.io/pro-robotech/charts/registry-instance
+  name: registry-instance
+  # - {version: 1.0.0, digest: "sha256:<64 hex>"}
+  pins: []
+
+# Форма Addon заказа, которую рендерит AddonTemplate.
+addon:
+  targetCluster: in-cluster
+  # Плагин управления конфигурацией Argo CD; пусто — встроенный Helm.
+  pluginName: ""
+  backend:
+    # namespace Argo CD.
+    namespace: ""
+    # shared — один проект project для всех заказов (стенд);
+    # tenant — проект <projectPrefix><login> на арендатора (appProjects ниже).
+    projectMode: shared
+    project: ""
+    projectPrefix: registry-
+    syncPolicy:
+      syncOptions:
+        - ServerSideApply=true
+        - FailOnSharedResource=true
+      retry:
+        limit: 5
+        backoff:
+          duration: 10s
+          factor: 2
+          maxDuration: 3m
+
+# Константы площадки: слой site (priority 10). Форма — site чарта registry-instance;
+# глубоко её проверяет схема registry-instance при рендере Addon (проба charts/tests
+# рендерит экземпляр с этим слоем).
+site: {}
+
+# Манифест модуля registry для kaname (files/registry.manifest.yaml): роли
+# registry.puller/pusher/admin с правилами на репозитории и личность модуля
+# kacho-registry; типы регистри — канон модели образа kaname. ConfigMap с одним ключом
+# registry.manifest.yaml и меткой kaname.in-cloud.io/module-manifest — по ней чарт kaname
+# собирает каталог доставки манифестов (README.md).
+kanameModule:
+  enabled: true
+  # namespace kaname, где лежит доставка манифестов.
+  namespace: ""
+  configMapName: registry-module-manifest
+  # Аккаунт системы kaname, в котором заведена личность модуля и группа
+  # module-relation-writers.
+  systemAccount: ""
+
+# Общие маршруты края: GET /v2/ (проверка версии API клиентом docker) и выдача токена
+# /iam/token. Маршрут заказа /v2/<id>/ ставит registry-operator.
+sharedRoutes:
+  enabled: true
+  namespace: ""
+  gateway:
+    name: ""
+    namespace: ""
+    sectionName: https
+  host: ""
+  apiRoot:
+    # Site-owned Service для private Pods одной site.routingGroup; backend задаёт его имя/namespace.
+    privatePool: false
+    backend:
+      namespace: ""
+      name: ""
+      port: 8080
+  token:
+    backend:
+      namespace: ""
+      name: ""
+      port: 8080
+
+# Gateway края.
+gateway:
+  enabled: true
+  name: ""
+  namespace: ""
+  gatewayClassName: ""
+  sectionName: https
+  host: ""
+  certificateSecretName: ""
+  # Метки namespace, из которых Gateway принимает маршруты (namespace края).
+  routeNamespaceLabels: {}
+
+# Порядок объектов края, когда площадка ставит этот чарт через Addon: AddonPhase,
+# связанный с Addon addonName (у addons-operator фаза связана с Addon по имени),
+# подмешивает слой <addonName>-edge, который включает gateway и sharedRoutes, как
+# только CRD crdName получила Established. Базовый слой Addon площадки держит их
+# выключенными до этого, и первая синхронизация не падает на отсутствующих видах.
+addonPhase:
+  enabled: true
+  addonName: registry-platform
+  crdName: httproutes.gateway.networking.k8s.io
+  priority: 50
+
+# ПОКА БЕЗ (владелец 2026-10-22): политики допуска V1–V15. Те же проверки исполняет
+# registry-operator перед записью, поэтому без них оператор запрещённого не создаёт;
+# политики закрывают писателей помимо оператора.
+admission:
+  enabled: false
+  # namespace ConfigMap параметров политик.
+  paramsNamespace: ""
+  # Метки namespace арендаторов.
+  tenantNamespaceLabels:
+    registry.in-cloud.io/tenant: "true"
+  # Учётки авторов: system:serviceaccount:<ns>:<name>.
+  authors:
+    registryOperator: ""
+    addonsOperator: ""
+    argoController: ""
+    replicaSetController: system:serviceaccount:kube-system:replicaset-controller
+    namespaceController: system:serviceaccount:kube-system:namespace-controller
+    garbageCollector: system:serviceaccount:kube-system:generic-garbage-collector
+    # Учётки и группы платформы (администраторы, онбординг namespace).
+    platformUsers: []
+    platformGroups: []
+  # Роли kaname, которые выдаёт оператор роботам заказа.
+  allowedRoles:
+    - registry.puller
+    - registry.pusher
+    - registry.admin
+  # Форма ресурсов Vault заказа.
+  vault:
+    config: ""
+    s3Config: ""
+    authMount: ""
+    secretsPrefix: ""
+    kvMount: secret
+    legacyGlobalPrefixTemplates: []
+  # Маршрут заказа: namespace края и переменные Addon. routeNamespace равен
+  # site.edge.routeNamespace: только маршрутам этого namespace ReferenceGrant экземпляра
+  # открывает Service zot-<id>; расхождение — отказ рендера.
+  routeNamespace: ""
+  routeHost: ""
+
+# ПОКА БЕЗ (владелец 2026-10-22): AppProject на арендатора.
+appProjects:
+  enabled: false
+  # Логины (namespace) подключённых арендаторов.
+  tenants: []

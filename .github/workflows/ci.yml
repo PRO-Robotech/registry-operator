@@ -1,0 +1,320 @@
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  generate:
+    name: generated files are current
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go mod tidy && git diff --exit-code -- go.mod go.sum
+      - run: make verify-generated
+
+  test:
+    name: unit and envtest (-race)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: make test
+        run: make test 2>&1 | tee test.log; exit ${PIPESTATUS[0]}
+      - name: census
+        if: always()
+        run: |
+          pass=$(grep -c -- '--- PASS:' test.log || true)
+          fail=$(grep -c -- '--- FAIL:' test.log || true)
+          skip=$(grep -c -- '--- SKIP:' test.log || true)
+          echo "packages ok $(grep -c '^ok ' test.log || true), FAIL $(grep -c '^FAIL' test.log || true), no test files $(grep -c 'no test files' test.log || true)"
+          echo "tests and subtests: passed $pass, failed $fail, skipped $skip"
+          [ "$pass" -gt 0 ] && [ "$fail" -eq 0 ] && [ "$skip" -eq 0 ]
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-log
+          path: test.log
+
+  injections:
+    name: every probe can fail (injection table)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: pip install --quiet pyyaml==6.0.2
+      - run: make inject
+
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: make lint
+
+  chart:
+    name: chart renders a configuration the operator accepts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+      - run: helm lint charts/registry-operator -f charts/registry-operator/ci/test-values.yaml
+      - name: render and check the configuration
+        run: |
+          helm template t charts/registry-operator -n registry-system -f charts/registry-operator/ci/test-values.yaml > rendered.yaml
+          yq 'select(.kind == "ConfigMap") | .data["config.yaml"]' rendered.yaml > config.yaml
+          go run ./hack/checkconfig config.yaml
+      - run: pip install --quiet pyyaml==6.0.2
+      - name: the enrollment endpoint admits only zot pods
+        run: |
+          python3 hack/check-netpol.py rendered.yaml
+          # Инъекции: без политики и с открытым источником проверка обязана упасть.
+          yq 'select(.kind != "NetworkPolicy")' rendered.yaml > no-policy.yaml
+          if python3 hack/check-netpol.py no-policy.yaml; then echo "check-netpol is blind to a missing policy"; exit 1; fi
+          yq '(select(.kind == "NetworkPolicy") | .spec.ingress[] | select(.ports[].port == "enrollment") | .from) = [{"namespaceSelector": {}}]' rendered.yaml > open.yaml
+          if python3 hack/check-netpol.py open.yaml; then echo "check-netpol is blind to an open source"; exit 1; fi
+      - name: the values prefix reaches exactly the order layers of registry-platform
+        run: |
+          python3 hack/check-values-layers.py rendered.yaml charts/tests/golden/platform-*.yaml
+          # Инъекции: префикс края платформы и префикс, захватывающий край, — находка (код 1),
+          # а не «не выполнилось» (код 2); законный близнец — проверка выше.
+          for bad in registry-platform registry-; do
+            helm template t charts/registry-operator -n registry-system -f charts/registry-operator/ci/test-values.yaml \
+              --set config.policy.addon.valuesAddonPrefix="$bad" > "inj-$bad.yaml"
+            set +e; python3 hack/check-values-layers.py "inj-$bad.yaml" charts/tests/golden/platform-*.yaml; code=$?; set -e
+            [ "$code" -eq 1 ] || { echo "check-values-layers is blind to valuesAddonPrefix=$bad (code $code, want 1)"; exit 1; }
+          done
+      - name: refusals have their reason
+        run: |
+          set +e
+          out=$(helm template t charts/registry-operator -f charts/registry-operator/ci/test-values.yaml --set image.digest= 2>&1); code=$?
+          set -e
+          [ $code -ne 0 ] && grep -q 'image.tag and image.digest' <<<"$out"
+
+  zot:
+    name: iam-proxy in front of a real zot
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: zot
+        run: |
+          docker run -d --name zot -p 127.0.0.1:5000:5000 ghcr.io/project-zot/zot-linux-amd64:v2.1.20@sha256:95a837a0afacf5b7edc0c92493f04beee6891989b8d2fd50a00cf65a1e6d4fd5
+          for i in 1 2 3 4 5 6 7 8 9 10; do curl -fsS http://127.0.0.1:5000/v2/ >/dev/null && break; sleep 3; done
+          curl -fsS http://127.0.0.1:5000/v2/
+      - run: ZOT_URL=http://127.0.0.1:5000 go test -tags=integration -count=1 -race -v ./test/integration/
+      - name: zot log
+        if: failure()
+        run: docker logs zot | tail -100
+
+  kind-e2e:
+    name: kind e2e (operator under its own role)
+    runs-on: ubuntu-latest
+    needs: [test]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Source provenance before runtime checks
+        run: |
+          python3 -I - before <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+
+          def git(*args):
+              return subprocess.check_output(['git', *args], text=True).strip()
+
+          phase = sys.argv[1]
+          assert phase in ('before', 'after'), phase
+          head = git('rev-parse', 'HEAD')
+          assert head == os.environ['GITHUB_SHA'], 'source HEAD differs from event SHA'
+          assert not git('status', '--porcelain', '--untracked-files=no'), 'tracked source changed'
+          if phase == 'before':
+              assert not git('ls-files', '--others', '--exclude-standard'), 'initial checkout has untracked files'
+          print('OPERATOR_SOURCE_V1 ' + json.dumps({
+              'phase': phase, 'head': head, 'tree': git('rev-parse', 'HEAD^{tree}'),
+              'tracked_clean': True, 'run_id': int(os.environ['GITHUB_RUN_ID']),
+              'run_attempt': int(os.environ['GITHUB_RUN_ATTEMPT']), 'job': os.environ['GITHUB_JOB'],
+          }, sort_keys=True))
+          PY
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+      - name: local registry and kind
+        run: |
+          docker run -d --restart=always -p 127.0.0.1:5001:5000 --name kind-registry registry:2
+          make kind
+          cat > kind.yaml <<'KIND'
+          kind: Cluster
+          apiVersion: kind.x-k8s.io/v1alpha4
+          containerdConfigPatches:
+          - |-
+            [plugins."io.containerd.grpc.v1.cri".registry]
+              config_path = "/etc/containerd/certs.d"
+          KIND
+          bin/kind-v0.33.0 create cluster --config kind.yaml --wait 180s
+          for node in $(bin/kind-v0.33.0 get nodes); do
+            docker exec "$node" mkdir -p /etc/containerd/certs.d/localhost:5001
+            printf '[host."http://kind-registry:5000"]\n' | docker exec -i "$node" cp /dev/stdin /etc/containerd/certs.d/localhost:5001/hosts.toml
+          done
+          docker network connect kind kind-registry
+      - name: images and stand chart
+        id: img
+        run: |
+          docker build -t localhost:5001/registry-operator:e2e -f Dockerfile .
+          docker build -t localhost:5001/kaname-fake:e2e -f Dockerfile.e2e-fake .
+          docker push localhost:5001/registry-operator:e2e
+          docker push localhost:5001/kaname-fake:e2e
+          echo "operator=$(docker inspect --format '{{index .RepoDigests 0}}' localhost:5001/registry-operator:e2e)" >> "$GITHUB_OUTPUT"
+          echo "fake=$(docker inspect --format '{{index .RepoDigests 0}}' localhost:5001/kaname-fake:e2e)" >> "$GITHUB_OUTPUT"
+          helm package test/e2e/testdata/registry-instance -d /tmp/chart
+          out=$(helm push /tmp/chart/registry-instance-1.0.0.tgz oci://localhost:5001/charts --plain-http 2>&1); echo "$out"
+          echo "chart=$(grep -o 'sha256:[a-f0-9]\{64\}' <<<"$out" | head -1)" >> "$GITHUB_OUTPUT"
+      - run: make crds
+      - name: e2e
+        env:
+          E2E_OPERATOR_IMAGE: ${{ steps.img.outputs.operator }}
+          E2E_FAKE_IMAGE: ${{ steps.img.outputs.fake }}
+          E2E_CHART_HOST: kind-registry:5000
+          E2E_CHART_DIGEST: ${{ steps.img.outputs.chart }}
+        run: REGOP_TEST_CRDS="$PWD/bin/crds" go test -tags=e2e -count=1 -timeout 30m ./test/e2e/ -v
+      - name: Source provenance after runtime checks
+        run: |
+          python3 -I - after <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+
+          def git(*args):
+              return subprocess.check_output(['git', *args], text=True).strip()
+
+          phase = sys.argv[1]
+          assert phase in ('before', 'after'), phase
+          head = git('rev-parse', 'HEAD')
+          assert head == os.environ['GITHUB_SHA'], 'source HEAD differs from event SHA'
+          assert not git('status', '--porcelain', '--untracked-files=no'), 'tracked source changed'
+          if phase == 'before':
+              assert not git('ls-files', '--others', '--exclude-standard'), 'initial checkout has untracked files'
+          print('OPERATOR_SOURCE_V1 ' + json.dumps({
+              'phase': phase, 'head': head, 'tree': git('rev-parse', 'HEAD^{tree}'),
+              'tracked_clean': True, 'run_id': int(os.environ['GITHUB_RUN_ID']),
+              'run_attempt': int(os.environ['GITHUB_RUN_ATTEMPT']), 'job': os.environ['GITHUB_JOB'],
+          }, sort_keys=True))
+          PY
+      - name: operator log
+        if: failure()
+        run: kubectl -n registry-system logs deploy/registry-operator --tail=300 || true
+
+  docker:
+    name: images
+    runs-on: ubuntu-latest
+    needs: [test, lint]
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Source provenance before image builds
+        run: |
+          python3 -I - before <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+
+          def git(*args):
+              return subprocess.check_output(['git', *args], text=True).strip()
+
+          phase = sys.argv[1]
+          assert phase in ('before', 'after'), phase
+          head = git('rev-parse', 'HEAD')
+          assert head == os.environ['GITHUB_SHA'], 'source HEAD differs from event SHA'
+          assert not git('status', '--porcelain', '--untracked-files=no'), 'tracked source changed'
+          if phase == 'before':
+              assert not git('ls-files', '--others', '--exclude-standard'), 'initial checkout has untracked files'
+          print('OPERATOR_SOURCE_V1 ' + json.dumps({
+              'phase': phase, 'head': head, 'tree': git('rev-parse', 'HEAD^{tree}'),
+              'tracked_clean': True, 'run_id': int(os.environ['GITHUB_RUN_ID']),
+              'run_attempt': int(os.environ['GITHUB_RUN_ATTEMPT']), 'job': os.environ['GITHUB_JOB'],
+          }, sort_keys=True))
+          PY
+      - id: tag
+        run: echo "tag=$(echo "${GITHUB_REF_NAME}" | sed 's#/#-#g')-${GITHUB_SHA::8}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - id: login
+        name: login to Docker Hub
+        env:
+          USER: ${{ secrets.DOCKERHUB_USERNAME }}
+          TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -z "$USER" ] || [ -z "$TOKEN" ]; then echo "push=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          echo "$TOKEN" | docker login -u "$USER" --password-stdin
+          echo "push=true" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: ${{ steps.login.outputs.push == 'true' }}
+          provenance: false
+          tags: prorobotech/registry-operator:${{ steps.tag.outputs.tag }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.iam-proxy
+          push: ${{ steps.login.outputs.push == 'true' }}
+          provenance: false
+          tags: prorobotech/registry-iam-proxy:${{ steps.tag.outputs.tag }}
+
+      - name: Source provenance after image builds
+        run: |
+          python3 -I - after <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+
+          def git(*args):
+              return subprocess.check_output(['git', *args], text=True).strip()
+
+          phase = sys.argv[1]
+          assert phase in ('before', 'after'), phase
+          head = git('rev-parse', 'HEAD')
+          assert head == os.environ['GITHUB_SHA'], 'source HEAD differs from event SHA'
+          assert not git('status', '--porcelain', '--untracked-files=no'), 'tracked source changed'
+          if phase == 'before':
+              assert not git('ls-files', '--others', '--exclude-standard'), 'initial checkout has untracked files'
+          print('OPERATOR_SOURCE_V1 ' + json.dumps({
+              'phase': phase, 'head': head, 'tree': git('rev-parse', 'HEAD^{tree}'),
+              'tracked_clean': True, 'run_id': int(os.environ['GITHUB_RUN_ID']),
+              'run_attempt': int(os.environ['GITHUB_RUN_ATTEMPT']), 'job': os.environ['GITHUB_JOB'],
+          }, sort_keys=True))
+          PY
+      - run: echo "pushed=${{ steps.login.outputs.push }} tag=${{ steps.tag.outputs.tag }}"

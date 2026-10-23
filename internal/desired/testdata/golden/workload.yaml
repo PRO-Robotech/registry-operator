@@ -1,0 +1,60 @@
+apiVersion: addons.in-cloud.io/v1alpha1
+kind: Addon
+metadata:
+  name: reg-abc123
+  labels:
+    app.kubernetes.io/managed-by: registry-operator
+    registry.in-cloud.io/id: abc123
+    registry.in-cloud.io/namespace: cust01
+    registry.in-cloud.io/owner-uid: 6f1c2a3b-4d5e-4f60-8a71-92b3c4d5e6f7
+    registry.in-cloud.io/template: zot-v1
+    registry.in-cloud.io/step: workload
+  annotations:
+    registry.in-cloud.io/chart-digest: sha256:acf4e9b3f3cace43e81cb7eae9c52553217f30b4578fd812ef55657286390304
+spec:
+  repoURL: oci://ghcr.io/pro-robotech/charts
+  chart: registry-instance
+  version: 1.0.0
+  releaseName: zot-abc123
+  targetCluster: in-cluster
+  targetNamespace: cust01
+  pluginName: helm-with-values
+  backend:
+    type: argocd
+    namespace: argocd
+    project: registry-cust01
+    finalizer: true
+    syncPolicy:
+      automated:
+        prune: true
+        selfHeal: true
+      syncOptions: [ServerSideApply=true, FailOnSharedResource=true]
+      retry:
+        limit: 10
+        backoff:
+          duration: 10s
+          factor: 2
+          maxDuration: 5m
+  valuesSelectors:
+  - name: site
+    priority: 10
+    matchLabels:
+      addons.in-cloud.io/addon: registry-instance
+      addons.in-cloud.io/values: site
+  - name: order
+    priority: 20
+    matchLabels:
+      addons.in-cloud.io/addon: registry-instance
+      addons.in-cloud.io/values: order
+  variables:
+    id: abc123
+    login: cust01
+    registryUID: 6f1c2a3b-4d5e-4f60-8a71-92b3c4d5e6f7
+    syncEpoch: "0"
+    public: "false"
+    bucket: cust01-zot-abc123
+    endpoint: https://s3.example.test
+    region: ru-1
+    vaultSecretPath: secret/data/clusters/site-a/abc123/namespaces/cust01/apps/docker-registry/zot-abc123
+    vaultAuthMount: kubernetes-site-a
+    vaultRole: zot-abc123

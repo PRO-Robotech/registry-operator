@@ -1,0 +1,12 @@
+# Переменные Addon заказа abc123 арендатора cust01 — как их пишет registry-operator.
+id: abc123
+login: cust01
+registryUID: 3f1c2a9e-7b4d-4e8a-9c21-5d6f7a8b9c0d
+syncEpoch: "0"
+public: "false"
+bucket: cust01-zot-abc123
+endpoint: https://s3.example.test
+region: ru-1
+vaultSecretPath: secret/data/clusters/example/namespaces/cust01/apps/docker-registry/zot-abc123
+vaultAuthMount: kubernetes-tenants
+vaultRole: zot-abc123

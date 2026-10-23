@@ -1,0 +1,338 @@
+name: integration-kaname
+
+# iam-proxy и регистрация оператора против НАСТОЯЩЕГО kaname (стенд чартом в
+# kind, stand-chart.sh клона kaname).
+#
+# Ревизия и опубликованный digest kaname закреплены вместе. Прямой REST
+# проверяет opaque service-account credential и сохраняет поддержку JWT.
+# Исходник той же ревизии даёт скрипты стенда и посевы церемонии человека.
+#
+# Манифест модуля registry — charts/registry-platform/files/registry.manifest.yaml
+# ЭТОГО дерева и только его: дерево без манифеста — условие не создано.
+#
+# Условие не создано (нет образа, манифеста, стенда, посева) — прогон НЕ
+# ВЫПОЛНИЛСЯ: шаг называет недостающее аннотацией и завершается отказом — это
+# не зелёный и не вердикт о дереве. Код 75 стенда и it-kaname.sh — то же
+# «условие не создано».
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: integration-kaname-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kaname:
+    name: real kaname (kind, chart)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      KANAME_REF: 1e09286f147ba6ef2e491c99562708978d480a4a
+      KANAME_IMAGE: docker.io/prorobotech/kaname:955-1e09286f@sha256:bde439443ebfd605453d6935899d036620f7070593a3aecbcf62ac75e0e06805
+      MANIFEST_PATH: charts/registry-platform/files/registry.manifest.yaml
+      KANAME_STAND_ALERT_RULES: "off"
+      KANAME_STAND_CLUSTER: regop-it-kaname
+      KANAME_STAND_SKIP_BUILD: "1"
+      REGOP_IT_CONTEXT: kind-regop-it-kaname
+      REGOP_IT_NAMESPACE: kaname
+      REGOP_IT_RELEASE: kaname
+    steps:
+      - uses: actions/checkout@v4
+      - name: Source provenance before runtime checks
+        run: |
+          python3 -I - before <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+
+          def git(*args):
+              return subprocess.check_output(['git', *args], text=True).strip()
+
+          phase = sys.argv[1]
+          assert phase in ('before', 'after'), phase
+          head = git('rev-parse', 'HEAD')
+          assert head == os.environ['GITHUB_SHA'], 'source HEAD differs from event SHA'
+          assert not git('status', '--porcelain', '--untracked-files=no'), 'tracked source changed'
+          if phase == 'before':
+              assert not git('ls-files', '--others', '--exclude-standard'), 'initial checkout has untracked files'
+          print('OPERATOR_SOURCE_V1 ' + json.dumps({
+              'phase': phase, 'head': head, 'tree': git('rev-parse', 'HEAD^{tree}'),
+              'tracked_clean': True, 'run_id': int(os.environ['GITHUB_RUN_ID']),
+              'run_attempt': int(os.environ['GITHUB_RUN_ATTEMPT']), 'job': os.environ['GITHUB_JOB'],
+          }, sort_keys=True))
+          PY
+
+      - name: Conditions (kaname image, the module manifest)
+        id: cond
+        run: |
+          missing=""
+          docker manifest inspect "$KANAME_IMAGE" >/dev/null 2>&1 || missing="$missing; image $KANAME_IMAGE is not published"
+          manifest="$RUNNER_TEMP/registry.manifest.yaml"
+          if [ -s "$MANIFEST_PATH" ]; then
+            cp "$MANIFEST_PATH" "$manifest"
+            echo "manifest: this tree"
+          else
+            missing="$missing; no registry module manifest $MANIFEST_PATH in this tree"
+          fi
+          if [ -n "$missing" ]; then
+            echo "::error title=NOT EXECUTED::${missing#; } — no verdict about the tree"
+            exit 1
+          fi
+          echo "REGOP_IT_MANIFEST=$manifest" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v4
+        with:
+          repository: PRO-Robotech/kaname
+          ref: ${{ env.KANAME_REF }}
+          path: .kaname-src
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+
+      - name: Stand coordinates (outside the work tree)
+        run: |
+          echo "KANAME_STAND_WORKDIR=$RUNNER_TEMP/kaname-stand" >> "$GITHUB_ENV"
+          echo "KUBECONFIG=$RUNNER_TEMP/kaname-stand.kubeconfig" >> "$GITHUB_ENV"
+          echo "REGOP_IT_KUBECONFIG=$RUNNER_TEMP/kaname-stand.kubeconfig" >> "$GITHUB_ENV"
+          echo "REGOP_IT_CA_DIR=$RUNNER_TEMP/kaname-stand/pki" >> "$GITHUB_ENV"
+          echo "REGOP_IT_CEREMONY_ENV=$GITHUB_WORKSPACE/.kaname-src/tests/newman/environments/local.postman_environment.json" >> "$GITHUB_ENV"
+
+      - name: Tools
+        run: |
+          rc=0
+          go install sigs.k8s.io/kind@v0.33.0 || rc=$?
+          go install github.com/fullstorydev/grpcurl/cmd/grpcurl@v1.9.3 || rc=$?
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          pip install --quiet pyyaml==6.0.2 || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "::error title=NOT EXECUTED::tools are not installed (rc=$rc) — no verdict about the tree"
+            exit 1
+          fi
+
+      - name: kaname image
+        run: |
+          docker pull "$KANAME_IMAGE"
+          docker image save "$KANAME_IMAGE" -o "$RUNNER_TEMP/kaname-pinned.tar"
+          python3 - <<'IMAGEPROOF'
+          import json,os,subprocess,tarfile,hashlib
+          pin=os.environ['KANAME_IMAGE']; expected='sha256:e71b204679dbc36c78e6253d20e1794b0f0164f87efe7bae3d1b1ca4f6908344'
+          image=json.loads(subprocess.check_output(['docker','image','inspect',pin]))[0]
+          print('KANAME_DOCKER_IDENTITY '+json.dumps({k:image.get(k) for k in ['Id','Descriptor','RepoDigests','RepoTags','Os','Architecture']},sort_keys=True))
+          with tarfile.open(os.environ['RUNNER_TEMP']+'/kaname-pinned.tar','r') as archive:
+              manifest=json.load(archive.extractfile('manifest.json')); assert len(manifest)==1
+              config=archive.extractfile(manifest[0]['Config']).read()
+          assert 'sha256:'+hashlib.sha256(config).hexdigest()==expected
+          assert json.loads(config)['os']=='linux' and json.loads(config)['architecture']=='amd64'
+          assert json.loads(config)['config']['Labels']['org.opencontainers.image.revision']==os.environ['KANAME_REF']
+          assert pin.split('@',1)[1] in [x.rsplit('@',1)[-1] for x in image['RepoDigests']]
+          alias='regop-kaname-verified:1e09286f'
+          subprocess.run(['docker','tag',pin,alias],check=True)
+          assert json.loads(subprocess.check_output(['docker','image','inspect',alias]))[0]['Id']==image['Id']
+          with open(os.environ['GITHUB_ENV'],'a') as f:
+              f.write('REGOP_KIND_ALIAS='+alias+'\nREGOP_KIND_CONFIG='+expected+'\nREGOP_KIND_DOCKER_ID='+image['Id']+'\n')
+          print('KANAME_IMMUTABLE_TRANSPORT '+json.dumps({'pin':pin,'config':expected,'revision':os.environ['KANAME_REF'],'alias':alias},sort_keys=True))
+          IMAGEPROOF
+          echo "KANAME_STAND_IMAGE=$KANAME_IMAGE" >> "$GITHUB_ENV"
+          echo "REGOP_KIND_REAL=$(command -v kind)" >> "$GITHUB_ENV"
+          mkdir "$RUNNER_TEMP/verified-kind"
+          cat > "$RUNNER_TEMP/verified-kind/kind" <<'KINDLOAD'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          if [ "${1:-}" = load ] && [ "${2:-}" = docker-image ]; then
+            [ "$#" -eq 5 ] && [ "$3" = "$KANAME_IMAGE" ] && [ "$4" = --name ] && [ "$5" = "$KANAME_STAND_CLUSTER" ] || exit 64
+            [ "$(docker image inspect --format '{{.Id}}' "$REGOP_KIND_ALIAS")" = "$REGOP_KIND_DOCKER_ID" ] || exit 65
+            "$REGOP_KIND_REAL" load docker-image "$REGOP_KIND_ALIAS" --name "$KANAME_STAND_CLUSTER"
+            docker exec "$KANAME_STAND_CLUSTER-control-plane" crictl inspecti "$REGOP_KIND_ALIAS" > "$RUNNER_TEMP/verified-kind/cri.json"
+            python3 - <<'CRIGUARD'
+          import json,os
+          s=json.load(open(os.environ['RUNNER_TEMP']+'/verified-kind/cri.json'))['status']
+          assert s['id']==os.environ['REGOP_KIND_CONFIG']
+          assert 'docker.io/library/'+os.environ['REGOP_KIND_ALIAS'] in s['repoTags']
+          with open(os.environ['RUNNER_TEMP']+'/verified-kind/import-proof.json','w') as f: json.dump({'config':s['id'],'repoTags':s['repoTags']},f,sort_keys=True)
+          CRIGUARD
+            exit 0
+          fi
+          exec "$REGOP_KIND_REAL" "$@"
+          KINDLOAD
+          chmod 700 "$RUNNER_TEMP/verified-kind/kind"
+          echo "$RUNNER_TEMP/verified-kind" >> "$GITHUB_PATH"
+
+      - name: kaname stand up
+        timeout-minutes: 30
+        working-directory: .kaname-src
+        run: |
+          rc=0
+          .github/scripts/stand-chart.sh up || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            python3 - <<'OWNDIAG' || echo "OWN_POD_DIAGNOSTIC unavailable; original stand rc retained"
+          import json, subprocess, re
+          
+          def call(argv):
+              p=subprocess.run(argv,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=25)
+              if p.returncode: raise RuntimeError('read failed: '+argv[0])
+              return json.loads(p.stdout)
+          
+          def safe(s):
+              s=re.sub(r'[\x00-\x1f\x7f]', ' ', str(s))[:1200]
+              s=re.sub(r'(?i)(token|password|secret|authorization)([=: ]+)[^ ]+',r'\1\2[redacted]',s)
+              return s
+          
+          base=['kubectl','--context','kind-regop-it-kaname','--request-timeout=20s','-n','kaname']
+          dep=call(base+['get','deployment','kaname','-o','json'])
+          uid=dep['metadata']['uid']
+          rss=call(base+['get','replicasets','-o','json'])['items']
+          owned={x['metadata']['uid'] for x in rss if any(o.get('uid')==uid and o.get('kind')=='Deployment' for o in x['metadata'].get('ownerReferences',[]))}
+          pods=call(base+['get','pods','-o','json'])['items']
+          selected=[p for p in pods if any(o.get('uid') in owned and o.get('kind')=='ReplicaSet' for o in p['metadata'].get('ownerReferences',[]))]
+          assert selected, 'no owned Kaname pod'
+          for p in selected:
+              name=p['metadata']['name']; puid=p['metadata']['uid']
+              fresh=call(base+['get','pod',name,'-o','json']); assert fresh['metadata']['uid']==puid
+              states=[]
+              for c in fresh.get('status',{}).get('initContainerStatuses',[])+fresh.get('status',{}).get('containerStatuses',[]):
+                  state=c.get('state',{}); detail=state.get('waiting') or state.get('terminated') or {}
+                  states.append({'name':c['name'],'state':list(state),'reason':safe(detail.get('reason','')),'message':safe(detail.get('message','')),'exitCode':detail.get('exitCode'),'image':c.get('image'),'imageID':c.get('imageID')})
+              events=call(base+['get','events','--field-selector','involvedObject.uid='+puid,'-o','json'])['items']
+              print('OWN_POD_DIAGNOSTIC '+json.dumps({'deploymentUID':uid,'podUID':puid,'name':name,'node':fresh['spec'].get('nodeName'),'states':states,'events':[{'reason':safe(e.get('reason','')),'message':safe(e.get('message','')),'count':e.get('count'),'lastTimestamp':e.get('lastTimestamp')} for e in events if e.get('involvedObject',{}).get('uid')==puid]},sort_keys=True),flush=True)
+          node='regop-it-kaname-control-plane'
+          info=call(['docker','exec',node,'crictl','images','-o','json'])
+          images=[{'id':x.get('id'),'repoTags':x.get('repoTags'),'repoDigests':x.get('repoDigests'),'size':x.get('size')} for x in info.get('images',[]) if any('prorobotech/kaname' in s for s in x.get('repoTags',[])+x.get('repoDigests',[]))]
+          print('OWN_NODE_IMAGE_METADATA '+json.dumps({'node':node,'images':images},sort_keys=True),flush=True)
+          OWNDIAG
+          fi
+          case "$rc" in
+            0) ;;
+            75) echo "::error title=NOT EXECUTED::the kaname stand did not come up — no verdict about the tree"; exit 1 ;;
+            *) exit "$rc" ;;
+          esac
+
+          python3 - <<'DEPLOYEDIMAGE'
+          import json,os,re,subprocess
+          print('KANAME_NAMED_IMPORT '+json.dumps(json.load(open(os.environ['RUNNER_TEMP']+'/verified-kind/import-proof.json')),sort_keys=True))
+          base=['kubectl','--context',os.environ['REGOP_IT_CONTEXT'],'--request-timeout=20s','-n','kaname']
+          def get(args):return json.loads(subprocess.check_output(args,timeout=25))
+          dep=get(base+['get','deployment','kaname','-o','json'])
+          rs=get(base+['get','replicasets','-o','json'])['items']
+          uids={r['metadata']['uid'] for r in rs if any(o.get('uid')==dep['metadata']['uid'] and o.get('kind')=='Deployment' for o in r['metadata'].get('ownerReferences',[]))}
+          pods=[p for p in get(base+['get','pods','-o','json'])['items'] if any(o.get('uid') in uids and o.get('kind')=='ReplicaSet' for o in p['metadata'].get('ownerReferences',[])) and not p['metadata'].get('deletionTimestamp')]
+          assert len(pods)==1
+          p=pods[0]; fresh=get(base+['get','pod',p['metadata']['name'],'-o','json']);assert fresh['metadata']['uid']==p['metadata']['uid']
+          assert fresh['spec']['nodeName']==os.environ['KANAME_STAND_CLUSTER']+'-control-plane'
+          spec={c['name']:c for c in fresh['spec']['initContainers']+fresh['spec']['containers']}
+          statuses={c['name']:c for c in fresh['status']['initContainerStatuses']+fresh['status']['containerStatuses']}
+          node=fresh['spec']['nodeName']
+          version=subprocess.check_output(['docker','exec',node,'crictl','version'],timeout=25,text=True)
+          assert len(version)<=4096
+          runtime={}
+          for line in version.splitlines():
+              key,sep,value=line.partition(':'); assert sep and key in ['Version','RuntimeName','RuntimeVersion','RuntimeApiVersion'] and key not in runtime
+              value=value.strip(); assert value and len(value)<=256 and all(ord(c)>=32 for c in value)
+              runtime[key]=value
+          assert set(runtime)=={'Version','RuntimeName','RuntimeVersion','RuntimeApiVersion'}
+          print('KANAME_RUNTIME_VERSION '+json.dumps(runtime,sort_keys=True),flush=True)
+          for name in ['migrate','kaname']:
+              assert spec[name]['image']==os.environ['KANAME_IMAGE']
+              c=statuses[name]; cid=c['containerID']
+              print('KANAME_CONTAINER_REFERENCE '+json.dumps({'name':name,'containerID':cid,'podImageID':c.get('imageID')},sort_keys=True),flush=True)
+              assert isinstance(cid,str) and re.fullmatch(r'containerd://[0-9a-f]{64}',cid)
+              cid=cid.removeprefix('containerd://')
+              observed=get(['docker','exec',node,'crictl','inspect',cid])
+              status=observed['status']; labels=status['labels']; metadata=status['metadata']
+              image=observed['info']['config']['image']
+              stored=image['image']; requested=image['user_specified_image']
+              print('KANAME_CONTAINER_IDENTITY '+json.dumps({'containerID':status['id'],'name':metadata['name'],'podUID':labels.get('io.kubernetes.pod.uid'),'podName':labels.get('io.kubernetes.pod.name'),'namespace':labels.get('io.kubernetes.pod.namespace'),'storedImageID':stored,'requestedImage':requested},sort_keys=True),flush=True)
+              assert status['id']==cid and metadata['name']==name
+              assert labels['io.kubernetes.pod.uid']==fresh['metadata']['uid']
+              assert labels['io.kubernetes.pod.name']==fresh['metadata']['name'] and labels['io.kubernetes.pod.namespace']=='kaname'
+              assert stored==os.environ['REGOP_KIND_CONFIG'] and requested==os.environ['KANAME_IMAGE']
+              actual=get(['docker','exec',node,'crictl','inspecti',stored])['status']
+              print('KANAME_CONTAINER_IMAGE_CONFIG '+json.dumps({'containerID':cid,'config':actual['id']},sort_keys=True),flush=True)
+              assert actual['id']==os.environ['REGOP_KIND_CONFIG']
+          assert statuses['migrate']['state']['terminated']['exitCode']==0 and statuses['kaname']['ready']
+          print('KANAME_DEPLOYED_IMAGE '+json.dumps({'podUID':fresh['metadata']['uid'],'pin':os.environ['KANAME_IMAGE'],'config':os.environ['REGOP_KIND_CONFIG'],'containers':['migrate','kaname']},sort_keys=True))
+          DEPLOYEDIMAGE
+
+      - name: The registry module manifest of this tree is delivered
+        timeout-minutes: 10
+        run: |
+          rc=0
+          hack/it-kaname.sh deliver || rc=$?
+          case "$rc" in
+            0) ;;
+            75) echo "::error title=NOT EXECUTED::the manifest was not delivered — no verdict about the tree"; exit 1 ;;
+            *) exit "$rc" ;;
+          esac
+
+      - name: Human of the login lane and its ceremony token
+        timeout-minutes: 15
+        working-directory: .kaname-src
+        run: |
+          for cmd in seed-login-lane seed-ceremony; do
+            rc=0
+            .github/scripts/stand-chart.sh "$cmd" || rc=$?
+            case "$rc" in
+              0) ;;
+              75) echo "::error title=NOT EXECUTED::$cmd did not create its condition — no verdict about the tree"; exit 1 ;;
+              *) echo "::error title=NOT EXECUTED::$cmd was refused by kaname (rc=$rc) — the stand seed, not this tree"; exit 1 ;;
+            esac
+          done
+
+      - name: Probe against the stand
+        timeout-minutes: 25
+        run: |
+          rc=0
+          hack/it-kaname.sh probe > "$RUNNER_TEMP/kanameit.log" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/kanameit.log"
+          echo "kanameit rc=$rc"
+          case "$rc" in
+            0) ;;
+            75|3) echo "::error title=NOT EXECUTED::it-kaname.sh could not create its condition — no verdict about the tree"; exit 1 ;;
+            *) exit "$rc" ;;
+          esac
+
+      - name: Source provenance after runtime checks
+        run: |
+          python3 -I - after <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+
+          def git(*args):
+              return subprocess.check_output(['git', *args], text=True).strip()
+
+          phase = sys.argv[1]
+          assert phase in ('before', 'after'), phase
+          head = git('rev-parse', 'HEAD')
+          assert head == os.environ['GITHUB_SHA'], 'source HEAD differs from event SHA'
+          assert not git('status', '--porcelain', '--untracked-files=no'), 'tracked source changed'
+          if phase == 'before':
+              assert not git('ls-files', '--others', '--exclude-standard'), 'initial checkout has untracked files'
+          print('OPERATOR_SOURCE_V1 ' + json.dumps({
+              'phase': phase, 'head': head, 'tree': git('rev-parse', 'HEAD^{tree}'),
+              'tracked_clean': True, 'run_id': int(os.environ['GITHUB_RUN_ID']),
+              'run_attempt': int(os.environ['GITHUB_RUN_ATTEMPT']), 'job': os.environ['GITHUB_JOB'],
+          }, sort_keys=True))
+          PY
+      - name: kaname diagnostics on failure
+        if: failure() && steps.cond.outcome == 'success'
+        run: |
+          kubectl --context "$REGOP_IT_CONTEXT" -n kaname get pods -o wide || true
+          kubectl --context "$REGOP_IT_CONTEXT" -n kaname logs -l app=kaname --tail=200 --all-containers --prefix || true
+
+      - name: kaname stand down
+        if: always() && steps.cond.outcome == 'success'
+        working-directory: .kaname-src
+        run: .github/scripts/stand-chart.sh down || true

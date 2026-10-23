@@ -1,0 +1,45 @@
+{{- if .Values.addonPhase.enabled }}
+{{- $p := .Values.addonPhase }}
+---
+# Фаза Addon, которым площадка ставит этот чарт (addons-operator связывает AddonPhase с
+# Addon по имени). Объекты края — Gateway и общие маршруты — требуют видов Gateway API;
+# пока CRD не Established, базовый слой Addon площадки держит их выключенными, а это
+# правило подмешивает слой edge, как только CRD готова. keep защёлкивает правило:
+# переустановка CRD объекты края не снимает.
+apiVersion: addons.in-cloud.io/v1alpha1
+kind: AddonPhase
+metadata:
+  name: {{ $p.addonName | toJson }}
+  labels:
+    {{- include "rp.labels" . | nindent 4 }}
+spec:
+  rules:
+    - name: edge
+      criteria:
+        - source:
+            apiVersion: apiextensions.k8s.io/v1
+            kind: CustomResourceDefinition
+            name: {{ $p.crdName | toJson }}
+          jsonPath: "$.status.conditions[?@.type=='Established'].status"
+          operator: Equal
+          value: "True"
+          keep: true
+      selector:
+        name: edge
+        priority: {{ $p.priority | int }}
+        matchLabels:
+          addons.in-cloud.io/addon: {{ $p.addonName | toJson }}
+          addons.in-cloud.io/values: edge
+---
+# Слой edge Addon площадки: включает Gateway и общие маршруты.
+apiVersion: addons.in-cloud.io/v1alpha1
+kind: AddonValue
+metadata:
+  name: {{ printf "%s-edge" $p.addonName | toJson }}
+  labels:
+    {{- include "rp.labels" . | nindent 4 }}
+    addons.in-cloud.io/addon: {{ $p.addonName | toJson }}
+    addons.in-cloud.io/values: edge
+spec:
+  values: {{ dict "gateway" (dict "enabled" true) "sharedRoutes" (dict "enabled" true) | toYaml | toJson }}
+{{- end }}

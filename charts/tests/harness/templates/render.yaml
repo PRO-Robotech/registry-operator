@@ -1,0 +1,3 @@
+{{- /* Контекст тот же, что даёт addons-operator: слою — .Variables, шаблону Addon — .Values (заказ) и .Vars. */}}
+{{- $ctx := dict "Variables" .Values.variables "Vars" .Values.variables "Values" .Values.claim "Template" .Template }}
+{{- tpl .Values.text $ctx }}

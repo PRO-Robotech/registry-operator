@@ -1,0 +1,85 @@
+{{- $s3 := include "ri.url" .Values.storage.endpoint | fromJson }}
+{{- $n := .Values.site.network }}
+---
+# Сеть пода zot. На площадке действует запрет по умолчанию, поэтому разрешено ровно:
+# вход — прокси Envoy Gateway своего Gateway на :8080 (и kubelet на порт проб :8081,
+# если площадка его включила); выход — DNS (только нужные имена), S3 заказа, Vault,
+# публичный API kaname (Check и JWKS) и эндпоинт регистрации registry-operator.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "ri.base" . | toJson }}
+  labels:
+    {{- include "ri.labels" (dict "root" . "component" "workload") | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  endpointSelector:
+    matchLabels:
+      {{- include "ri.selectorLabels" . | nindent 6 }}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: {{ .Values.site.edge.proxy.namespace | toJson }}
+            k8s:gateway.envoyproxy.io/owning-gateway-namespace: {{ .Values.site.edge.proxy.gateway.namespace | toJson }}
+            k8s:gateway.envoyproxy.io/owning-gateway-name: {{ .Values.site.edge.proxy.gateway.name | toJson }}
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    {{- if $n.allowKubeletProbes }}
+    - fromEntities:
+        - host
+      toPorts:
+        - ports:
+            - port: "8081"
+              protocol: TCP
+    {{- end }}
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: {{ $n.dns.namespace | toJson }}
+            {{- range $k, $v := $n.dns.labels }}
+            {{ printf "k8s:%s" $k | toJson }}: {{ $v | toJson }}
+            {{- end }}
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              {{- range (include "ri.dnsNames" . | fromJsonArray) }}
+              - matchName: {{ . | toJson }}
+              - matchPattern: {{ printf "%s.*" . | toJson }}
+              {{- end }}
+    - toFQDNs:
+        - matchName: {{ $s3.host | toJson }}
+      toPorts:
+        - ports:
+            - port: {{ $s3.port | int | toString | toJson }}
+              protocol: TCP
+    {{- range (concat $n.vault $n.kaname $n.registryOperator) }}
+    {{- if .fqdn }}
+    - toFQDNs:
+        - matchName: {{ .fqdn | toJson }}
+    {{- else if .cidr }}
+    - toCIDR:
+        - {{ .cidr | toJson }}
+    {{- else }}
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: {{ .namespace | toJson }}
+            {{- range $k, $v := .labels }}
+            {{ printf "k8s:%s" $k | toJson }}: {{ $v | toJson }}
+            {{- end }}
+    {{- end }}
+      toPorts:
+        - ports:
+            {{- range .ports }}
+            - port: {{ . | int | toString | toJson }}
+              protocol: TCP
+            {{- end }}
+    {{- end }}
+{{- include "ri.check" . }}

@@ -1,0 +1,6 @@
+# Близнец: базовая площадка. Меняется один факт: адрес эндпоинта регистрации с путём —
+# iam-proxy принимает только https://host[:port] и сам дописывает путь заявки.
+# expect: at '/site/registryOperator/registrationURL'
+site:
+  registryOperator:
+    registrationURL: https://registry-operator.registry-system.svc:8443/v1/registries

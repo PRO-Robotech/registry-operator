@@ -1,0 +1,25 @@
+---
+# Разрешение маршруту заказа ссылаться на Service zot-<id>. Маршрут /v2/<id>/ ставит
+# registry-operator в namespace маршрутов края (site.edge.routeNamespace), Service живёт
+# здесь, в namespace арендатора; без разрешения Gateway API ссылку не разрешает
+# (ResolvedRefs=False, RefNotPermitted). Разрешено ровно одно ребро: HTTPRoute из
+# namespace маршрутов края → Service zot-<id>; прочие Service арендатора закрыты, а
+# маршруты из других namespace сослаться не могут. Волна 0 — раньше, чем маршрут
+# начнёт разрешаться.
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: {{ include "ri.base" . | toJson }}
+  labels:
+    {{- include "ri.labels" (dict "root" . "component" "edge") | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: {{ .Values.site.edge.routeNamespace | toJson }}
+  to:
+    - group: ""
+      kind: Service
+      name: {{ include "ri.base" . | toJson }}

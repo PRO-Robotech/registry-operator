@@ -1,0 +1,6 @@
+bin/
+charts/
+docs/
+test/
+.github/
+cover.out

@@ -1,0 +1,47 @@
+# Ревизия шаблона заказа zot-v1 (пример площадки site-a). Ставит платформа.
+apiVersion: registry.in-cloud.io/v1alpha1
+kind: RegistryTemplate
+metadata:
+  name: zot-v1
+spec:
+  templateName: zot
+  version: v1
+  claimPolicy:
+    namespaceSelector:
+      matchLabels:
+        registry.in-cloud.io/tenant: "true"
+  templates:
+    s3BucketClaim: {name: zot-s3, version: v1}
+    iamServiceAccount: {name: zot-robot, version: v1}
+    vaultClaim: {name: zot-vault, version: v1}
+    iamAccessBinding: {name: zot-pusher, version: v1}
+    addon: {name: zot-addon, version: v1}
+    httpRoute: {name: zot-route, version: v1}
+  stallTimeout: 15m
+  params: |
+    storage:
+      vaultConfig: s3-bucket
+      secretsPrefix: clusters/site-a
+      # Регион S3 площадки — обязателен: без непустого имени ревизия не
+      # принимается (чарт registry-instance отверг бы Addon без региона).
+      region: ru-1
+    secrets:
+      vaultConfig: default
+      secretsPrefix: clusters/site-a
+      authMount: kubernetes-site-a
+      kvMount: secret
+      audience: vault
+    identity:
+      keyTTLSeconds: 2592000
+    addon:
+      argocdNamespace: argocd
+      projectPrefix: registry-
+      # Метка addons.in-cloud.io/addon слоёв order и site, которые ставит чарт
+      # registry-platform (его addonName).
+      valuesAddon: registry-instance
+    route:
+      gatewayNamespace: registry-edge
+      gatewayName: registry-gw
+      sectionName: https
+      host: registry.example.test
+      backendPort: 8080

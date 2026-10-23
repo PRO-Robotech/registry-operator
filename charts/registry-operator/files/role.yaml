@@ -1,0 +1,165 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: registry-operator
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - addons.in-cloud.io
+  resources:
+  - addons
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - watch
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - argoproj.io
+  resources:
+  - applications
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - authentication.k8s.io
+  resources:
+  - tokenreviews
+  verbs:
+  - create
+- apiGroups:
+  - events.k8s.io
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - gateway.networking.k8s.io
+  resources:
+  - httproutes
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - watch
+- apiGroups:
+  - iam.kaname.in-cloud.io
+  resources:
+  - iamaccessbindings
+  - iamserviceaccounts
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - watch
+- apiGroups:
+  - observed.registry.in-cloud.io
+  resources:
+  - observedaddontemplates
+  - observedhttproutetemplates
+  - observediamaccessbindingtemplates
+  - observediamserviceaccounttemplates
+  - observeds3bucketclaimtemplates
+  - observedvaultclaimtemplates
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - observed.registry.in-cloud.io
+  resources:
+  - observedaddontemplates/finalizers
+  - observedhttproutetemplates/finalizers
+  - observediamaccessbindingtemplates/finalizers
+  - observediamserviceaccounttemplates/finalizers
+  - observeds3bucketclaimtemplates/finalizers
+  - observedvaultclaimtemplates/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - observed.registry.in-cloud.io
+  resources:
+  - observedaddontemplates/status
+  - observedhttproutetemplates/status
+  - observediamaccessbindingtemplates/status
+  - observediamserviceaccounttemplates/status
+  - observeds3bucketclaimtemplates/status
+  - observedvaultclaimtemplates/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - registry.in-cloud.io
+  resources:
+  - registries
+  - registrytemplates
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - registry.in-cloud.io
+  resources:
+  - registries/finalizers
+  - registrytemplates/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - registry.in-cloud.io
+  resources:
+  - registries/status
+  - registryidreservations/status
+  - registrytemplates/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - registry.in-cloud.io
+  resources:
+  - registryidreservations
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+- apiGroups:
+  - vault.in-cloud.io
+  resources:
+  - s3bucketclaims
+  - vaultclaims
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - watch

@@ -1,0 +1,25 @@
+apiVersion: iam.kaname.in-cloud.io/v1alpha1
+kind: IAMAccessBinding
+metadata:
+  name: zot-abc123-ci-pusher
+  namespace: cust01
+  labels:
+    app.kubernetes.io/managed-by: registry-operator
+    registry.in-cloud.io/id: abc123
+    registry.in-cloud.io/namespace: cust01
+    registry.in-cloud.io/owner-uid: 6f1c2a3b-4d5e-4f60-8a71-92b3c4d5e6f7
+    registry.in-cloud.io/template: zot-v1
+    registry.in-cloud.io/step: access
+spec:
+  subjects:
+  - serviceAccountRef:
+      name: zot-abc123-ci
+  roleRef:
+    name: registry.pusher
+  scope:
+    type: iam.project
+  target:
+    resources:
+    - type: registry.registries
+      id: abc123
+  deletionPolicy: Delete

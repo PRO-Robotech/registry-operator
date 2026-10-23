@@ -1,0 +1,6 @@
+# Близнец: базовая площадка. Меняется один факт: namespace маршрутов края не назван —
+# ReferenceGrant zot-<id> не знал бы, чьим маршрутам открыть Service.
+# expect: at '/site/edge': missing property 'routeNamespace'
+site:
+  edge:
+    routeNamespace:

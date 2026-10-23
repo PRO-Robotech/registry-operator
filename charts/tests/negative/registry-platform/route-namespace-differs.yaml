@@ -1,0 +1,6 @@
+# base: all
+# Близнец: platform-all. Меняется один факт: политика V3 ждёт маршруты заказов в другом
+# namespace, чем тот, чьим маршрутам ReferenceGrant экземпляра открывает Service.
+# expect: site.edge.routeNamespace "registry-edge" must equal admission.routeNamespace "other-edge"
+admission:
+  routeNamespace: other-edge

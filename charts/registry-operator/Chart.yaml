@@ -1,0 +1,6 @@
+apiVersion: v2
+name: registry-operator
+description: Operator of Registry orders — bucket, Vault role, IAM account, binding and resource registration, zot workload and route.
+type: application
+version: 0.1.1
+appVersion: "0.1.0"

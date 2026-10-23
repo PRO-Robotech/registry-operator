@@ -1,0 +1,14 @@
+# Целевые CRD проб envtest: путь в bin/crds, sha256, источник по закреплённой
+# ревизии. Источники — публичные репозитории; файл скачивается и сверяется
+# по sha256 (hack/fetch-crds.sh), копии в дереве нет.
+#   vault-operator@e83b0692767c (15-template-role: гостевой режим VaultClaim,
+#     names[], identityPaths, rolePruning=Owned);
+#   kaname-iam-operator@2f9abc31e0b4 (2-iam-crd);
+#   addons-operator@22b73fde37e6 (main);
+#   Gateway API v1.5.1 (standard-install: из него envtest берёт только CRD).
+vault.in-cloud.io_s3bucketclaims.yaml 5e1dcd01aaf313f4c1c0c9d24826fc0833ad596729cef6da75946aece525fd8e https://raw.githubusercontent.com/PRO-Robotech/vault-operator/e83b0692767cc190fd9d6fcbf7631e386e3a40fe/config/crd/bases/vault.in-cloud.io_s3bucketclaims.yaml
+vault.in-cloud.io_vaultclaims.yaml ca3a79194fc3b2b73b6a10944bfece1427dd540090dcbc03296efc408041d251 https://raw.githubusercontent.com/PRO-Robotech/vault-operator/e83b0692767cc190fd9d6fcbf7631e386e3a40fe/config/crd/bases/vault.in-cloud.io_vaultclaims.yaml
+iam.kaname.in-cloud.io_iamserviceaccounts.yaml eefe92ee2796d004dc5b6f6f53e0fcb43fa6c211ae752d7072b637b101117425 https://raw.githubusercontent.com/PRO-Robotech/kaname-iam-operator/26ee9709d57ca9ba00ac523695b6b927a3e59db3/config/crd/bases/iam.kaname.in-cloud.io_iamserviceaccounts.yaml
+iam.kaname.in-cloud.io_iamaccessbindings.yaml e1fba60e7dccda1388449093e0de6061e24ea084e1eafc1f8725991c1d135ba8 https://raw.githubusercontent.com/PRO-Robotech/kaname-iam-operator/26ee9709d57ca9ba00ac523695b6b927a3e59db3/config/crd/bases/iam.kaname.in-cloud.io_iamaccessbindings.yaml
+addons.in-cloud.io_addons.yaml c6e13b51a39078f03ce7b9a4ddc52daf56cd6cc3ace28a4bcd75b007732c7b7b https://raw.githubusercontent.com/PRO-Robotech/addons-operator/22b73fde37e6f824a86fd8ee33498f427798989e/config/crd/bases/addons.in-cloud.io_addons.yaml
+gateway-api-standard-install.yaml 751002b3b91a87f7ae3bd2517c79a47a8d7ed6702901808a1cf9bd97d284f9b8 https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.5.1/standard-install.yaml

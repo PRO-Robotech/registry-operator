@@ -1,0 +1,51 @@
+# registry-operator chart
+
+Ставит оператор заказов `Registry`: CRD (`crds/`), учётку, ClusterRole из маркеров
+(`files/role.yaml`, `make manifests`: запись — только шести ведомых видов и своих объектов,
+прочее — чтение), Role выборов лидера, конфигурацию, Service (эндпоинт заявок и метрики),
+Deployment, два Certificate cert-manager и NetworkPolicy: вход на эндпоинт заявок — только
+от подов zot (`networkPolicy.zotPodLabels`) из namespace арендаторов
+(`networkPolicy.tenantNamespaceSelector`), метрики — от `networkPolicy.metricsFrom` (пусто —
+от любого пода). Кластеру нужен CNI, исполняющий NetworkPolicy.
+
+## Обязательные значения
+
+| ключ | что |
+|---|---|
+| `image.tag`, `image.digest` | образ по digest; без digest рендер отказывает |
+| `config.policy` и остальная конфигурация оператора | см. `config/samples/operator-config.yaml`; пути файлов kaname и эндпоинта ставит чарт |
+| `kaname.certificate.issuerRef.name` | центр, которому доверяет внутренний листенер kaname; лист выпускается с URI SAN `spiffe://<kaname.trustDomain>/ns/<namespace релиза>/sa/kacho-<kaname.moduleName>` |
+| `enrollment.certificate.issuerRef.name` | центр серверного сертификата эндпоинта заявок |
+
+`certificate.create: false` — секреты `secretName` ставит платформа (ключи `tls.crt`,
+`tls.key`, `ca.crt`).
+
+## Что требуется от платформы
+
+- kaname: учётка службы `registry` (личность листа выше) с отношением `fga_writer` на
+  `cluster:cluster_root` и манифест модуля `registry` (типы `registry_registry`,
+  `registry_repository`);
+- метки namespace арендатора `kaname.in-cloud.io/project-id` и
+  `kaname.in-cloud.io/account-id`;
+- маршрут заказа в namespace края ссылается на Service в namespace арендатора — ReferenceGrant
+  (from: HTTPRoute namespace края, to: Service `zot-<id>`) ставит чарт `registry-instance`
+  вместе с рабочей нагрузкой; оператор пишет ровно шесть видов и ReferenceGrant не пишет;
+- центр серверного сертификата эндпоинта заявок — в namespace арендатора, для iam-proxy
+  (`--enroll-ca`).
+
+### Vault prefix isolation and legacy migration
+
+`config.policy.storage.secretsPrefix` and `config.policy.secrets.secretsPrefix`
+are the same trusted base. New Registry template revisions must render both
+claim prefixes as `<base>/<Registry.spec.id>`. The Vault policy and workload
+secret path must use that exact prefix; sibling IDs and arbitrary prefixes are
+refused.
+
+For an already provisioned legacy Registry only, configure
+`config.policy.legacyGlobalPrefixTemplates` with exact `{name, version}` pairs.
+Listed revisions require the old global prefix, while all other revisions require
+per-Registry isolation. This is migration compatibility, not concurrent isolation:
+a broad legacy VaultClaim owns its descendants. Purge or otherwise retire legacy
+orders through their normal lifecycle before creating isolated descendants.
+Never edit immutable claim prefixes in place. Keep the matching admission
+`vault.legacyGlobalPrefixTemplates` list aligned with the operator configuration.
