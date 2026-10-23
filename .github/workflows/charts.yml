@@ -171,8 +171,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
-      # Ревизия kaname, чей код судит доставку: та же, что образ стенда prorobotech/kaname:main-93ad1b88.
-      KANAME_REF: 93ad1b885469c79f284b9fc629f86fe3dde81a97
+      # Ревизия kaname, чей код судит доставку: та же, что опубликованный immutable образ стенда955-1e09286f.
+      KANAME_REF: 1e09286f147ba6ef2e491c99562708978d480a4a
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: azure/setup-helm@b9e51907a09c216f16ebe8536097933489208112 # v4.3.0

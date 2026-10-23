@@ -3,10 +3,9 @@ name: integration-kaname
 # iam-proxy и регистрация оператора против НАСТОЯЩЕГО kaname (стенд чартом в
 # kind, stand-chart.sh клона kaname).
 #
-# Ревизия kaname закреплена: образ prorobotech/kaname:main-93ad1b88 — обычный
-# токен kaname (служебной учётки и человека) несёт принципала и acr, и тот же
-# токен годен для API и для iam-proxy. Исходник той же ревизии даёт скрипты
-# стенда и посевы (человек полосы входа, его церемония).
+# Ревизия и опубликованный digest kaname закреплены вместе. Прямой REST
+# проверяет opaque service-account credential и сохраняет поддержку JWT.
+# Исходник той же ревизии даёт скрипты стенда и посевы церемонии человека.
 #
 # Манифест модуля registry — charts/registry-platform/files/registry.manifest.yaml
 # ЭТОГО дерева и только его: дерево без манифеста — условие не создано.
@@ -34,8 +33,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
-      KANAME_REF: 93ad1b885469c79f284b9fc629f86fe3dde81a97
-      KANAME_IMAGE: prorobotech/kaname:main-93ad1b88
+      KANAME_REF: 1e09286f147ba6ef2e491c99562708978d480a4a
+      KANAME_IMAGE: docker.io/prorobotech/kaname:955-1e09286f@sha256:bde439443ebfd605453d6935899d036620f7070593a3aecbcf62ac75e0e06805
       MANIFEST_PATH: charts/registry-platform/files/registry.manifest.yaml
       KANAME_STAND_ALERT_RULES: "off"
       KANAME_STAND_CLUSTER: regop-it-kaname

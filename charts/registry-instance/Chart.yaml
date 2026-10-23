@@ -1,11 +1,13 @@
 apiVersion: v2
 name: registry-instance
 description: >-
-  The zot of one on-demand registry with its iam-proxy: service account, pod
+  The zot of one on-demand registry with its iam-proxy: Kubernetes ServiceAccount, pod
   network policy, Service and Deployment (zot on S3 behind iam-proxy, which
   checks each request with the client's own kaname token). Installed through an
-  Addon written by registry-operator, which owns the bucket, the Vault role, the
-  IAM robot, binding and resource tuple and the edge route.
+  Addon written by registry-operator, which owns the bucket, the guest Vault
+  role, the resource tuple and the edge route. Client credentials and bindings
+  are managed by the external service; explicitly configured legacy identity
+  and access templates remain supported by the operator.
 type: application
 version: 1.0.1
 appVersion: "v2.1.20"

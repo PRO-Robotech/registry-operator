@@ -2,6 +2,8 @@ module github.com/PRO-Robotech/registry-operator
 
 go 1.26.8
 
+toolchain go1.26.10
+
 require (
 	github.com/PRO-Robotech/corelib v1.15.0
 	github.com/PRO-Robotech/kaname v0.5.0

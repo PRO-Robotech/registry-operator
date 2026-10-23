@@ -58,14 +58,13 @@ def positive(labels):
         assert result.stdout == base.stdout, 'empty map changed default bytes'
 
 
-def negative(labels, twin, reserved=None):
+def negative(labels, twin, reserved=None, expected_key=None):
     result = render(labels)
     assert result.returncode != 0, 'invalid input rendered successfully'
-    if isinstance(labels, dict) and reserved is None and 'invalid propertyName' in result.stderr:
+    if expected_key is not None:
         assert "values don't meet the specifications of the schema" in result.stderr, result.stderr
-        assert len(labels) == 1, 'key rejection must have one mutation'
-        key = next(iter(labels))
-        assert f"invalid propertyName '{key}'" in result.stderr, result.stderr
+        assert isinstance(labels, dict) and list(labels) == [expected_key], 'key rejection must have one mutation'
+        assert f"invalid propertyName '{expected_key}'" in result.stderr, result.stderr
     else:
         assert 'injectorLabels' in result.stderr, result.stderr
     if reserved:
@@ -132,7 +131,7 @@ for name, bad, good in [
     ('dns-segment-64', 'a' * 64 + '.b/c', 'a' * 63 + '.b/c'),
     ('dns-prefix-254', prefix253 + 'c/x', prefix253 + '/x'),
 ]:
-    case('invalid-key/' + name, lambda bad=bad, good=good: negative({bad: 'v'}, {good: 'v'}))
+    case('invalid-key/' + name, lambda bad=bad, good=good: negative({bad: 'v'}, {good: 'v'}, expected_key=bad))
 for name, bad, good in [('64', 'v' * 64, 'v' * 63), ('space', 'a b', 'a-b'),
                         ('leading-dash', '-v', 'v'), ('slash', 'a/b', 'a-b'),
                         ('boolean', True, 'true'), ('number', 3, '3'), ('null', None, '')]:
