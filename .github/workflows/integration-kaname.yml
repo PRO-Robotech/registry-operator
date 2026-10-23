@@ -124,7 +124,50 @@ jobs:
       - name: kaname image
         run: |
           docker pull "$KANAME_IMAGE"
+          docker image save "$KANAME_IMAGE" -o "$RUNNER_TEMP/kaname-pinned.tar"
+          python3 - <<'IMAGEPROOF'
+          import json,os,subprocess,tarfile,hashlib
+          pin=os.environ['KANAME_IMAGE']; expected='sha256:e71b204679dbc36c78e6253d20e1794b0f0164f87efe7bae3d1b1ca4f6908344'
+          image=json.loads(subprocess.check_output(['docker','image','inspect',pin]))[0]
+          print('KANAME_DOCKER_IDENTITY '+json.dumps({k:image.get(k) for k in ['Id','Descriptor','RepoDigests','RepoTags','Os','Architecture']},sort_keys=True))
+          with tarfile.open(os.environ['RUNNER_TEMP']+'/kaname-pinned.tar','r') as archive:
+              manifest=json.load(archive.extractfile('manifest.json')); assert len(manifest)==1
+              config=archive.extractfile(manifest[0]['Config']).read()
+          assert 'sha256:'+hashlib.sha256(config).hexdigest()==expected
+          assert json.loads(config)['os']=='linux' and json.loads(config)['architecture']=='amd64'
+          assert json.loads(config)['config']['Labels']['org.opencontainers.image.revision']==os.environ['KANAME_REF']
+          assert pin.split('@',1)[1] in [x.rsplit('@',1)[-1] for x in image['RepoDigests']]
+          alias='regop-kaname-verified:1e09286f'
+          subprocess.run(['docker','tag',pin,alias],check=True)
+          assert json.loads(subprocess.check_output(['docker','image','inspect',alias]))[0]['Id']==image['Id']
+          with open(os.environ['GITHUB_ENV'],'a') as f:
+              f.write('REGOP_KIND_ALIAS='+alias+'\nREGOP_KIND_CONFIG='+expected+'\nREGOP_KIND_DOCKER_ID='+image['Id']+'\n')
+          print('KANAME_IMMUTABLE_TRANSPORT '+json.dumps({'pin':pin,'config':expected,'revision':os.environ['KANAME_REF'],'alias':alias},sort_keys=True))
+          IMAGEPROOF
           echo "KANAME_STAND_IMAGE=$KANAME_IMAGE" >> "$GITHUB_ENV"
+          echo "REGOP_KIND_REAL=$(command -v kind)" >> "$GITHUB_ENV"
+          mkdir "$RUNNER_TEMP/verified-kind"
+          cat > "$RUNNER_TEMP/verified-kind/kind" <<'KINDLOAD'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          if [ "${1:-}" = load ] && [ "${2:-}" = docker-image ]; then
+            [ "$#" -eq 5 ] && [ "$3" = "$KANAME_IMAGE" ] && [ "$4" = --name ] && [ "$5" = "$KANAME_STAND_CLUSTER" ] || exit 64
+            [ "$(docker image inspect --format '{{.Id}}' "$REGOP_KIND_ALIAS")" = "$REGOP_KIND_DOCKER_ID" ] || exit 65
+            "$REGOP_KIND_REAL" load docker-image "$REGOP_KIND_ALIAS" --name "$KANAME_STAND_CLUSTER"
+            docker exec "$KANAME_STAND_CLUSTER-control-plane" crictl inspecti "$REGOP_KIND_ALIAS" > "$RUNNER_TEMP/verified-kind/cri.json"
+            python3 - <<'CRIGUARD'
+          import json,os
+          s=json.load(open(os.environ['RUNNER_TEMP']+'/verified-kind/cri.json'))['status']
+          assert s['id']==os.environ['REGOP_KIND_CONFIG']
+          assert 'docker.io/library/'+os.environ['REGOP_KIND_ALIAS'] in s['repoTags']
+          with open(os.environ['RUNNER_TEMP']+'/verified-kind/import-proof.json','w') as f: json.dump({'config':s['id'],'repoTags':s['repoTags']},f,sort_keys=True)
+          CRIGUARD
+            exit 0
+          fi
+          exec "$REGOP_KIND_REAL" "$@"
+          KINDLOAD
+          chmod 700 "$RUNNER_TEMP/verified-kind/kind"
+          echo "$RUNNER_TEMP/verified-kind" >> "$GITHUB_PATH"
 
       - name: kaname stand up
         timeout-minutes: 30
@@ -174,6 +217,29 @@ jobs:
             75) echo "::error title=NOT EXECUTED::the kaname stand did not come up — no verdict about the tree"; exit 1 ;;
             *) exit "$rc" ;;
           esac
+
+          python3 - <<'DEPLOYEDIMAGE'
+          import json,os,subprocess
+          print('KANAME_NAMED_IMPORT '+json.dumps(json.load(open(os.environ['RUNNER_TEMP']+'/verified-kind/import-proof.json')),sort_keys=True))
+          base=['kubectl','--context',os.environ['REGOP_IT_CONTEXT'],'--request-timeout=20s','-n','kaname']
+          def get(args):return json.loads(subprocess.check_output(args,timeout=25))
+          dep=get(base+['get','deployment','kaname','-o','json'])
+          rs=get(base+['get','replicasets','-o','json'])['items']
+          uids={r['metadata']['uid'] for r in rs if any(o.get('uid')==dep['metadata']['uid'] and o.get('kind')=='Deployment' for o in r['metadata'].get('ownerReferences',[]))}
+          pods=[p for p in get(base+['get','pods','-o','json'])['items'] if any(o.get('uid') in uids and o.get('kind')=='ReplicaSet' for o in p['metadata'].get('ownerReferences',[])) and not p['metadata'].get('deletionTimestamp')]
+          assert len(pods)==1
+          p=pods[0]; fresh=get(base+['get','pod',p['metadata']['name'],'-o','json']);assert fresh['metadata']['uid']==p['metadata']['uid']
+          assert fresh['spec']['nodeName']==os.environ['KANAME_STAND_CLUSTER']+'-control-plane'
+          spec={c['name']:c for c in fresh['spec']['initContainers']+fresh['spec']['containers']}
+          statuses={c['name']:c for c in fresh['status']['initContainerStatuses']+fresh['status']['containerStatuses']}
+          for name in ['migrate','kaname']:
+              assert spec[name]['image']==os.environ['KANAME_IMAGE']
+              c=statuses[name]; assert c['imageID']
+              actual=get(['docker','exec',fresh['spec']['nodeName'],'crictl','inspecti',c['imageID']])['status']
+              assert actual['id']==os.environ['REGOP_KIND_CONFIG']
+          assert statuses['migrate']['state']['terminated']['exitCode']==0 and statuses['kaname']['ready']
+          print('KANAME_DEPLOYED_IMAGE '+json.dumps({'podUID':fresh['metadata']['uid'],'pin':os.environ['KANAME_IMAGE'],'config':os.environ['REGOP_KIND_CONFIG'],'containers':['migrate','kaname']},sort_keys=True))
+          DEPLOYEDIMAGE
 
       - name: The registry module manifest of this tree is delivered
         timeout-minutes: 10
