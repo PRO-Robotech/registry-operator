@@ -219,7 +219,7 @@ jobs:
           esac
 
           python3 - <<'DEPLOYEDIMAGE'
-          import json,os,subprocess
+          import json,os,re,subprocess
           print('KANAME_NAMED_IMPORT '+json.dumps(json.load(open(os.environ['RUNNER_TEMP']+'/verified-kind/import-proof.json')),sort_keys=True))
           base=['kubectl','--context',os.environ['REGOP_IT_CONTEXT'],'--request-timeout=20s','-n','kaname']
           def get(args):return json.loads(subprocess.check_output(args,timeout=25))
@@ -232,10 +232,33 @@ jobs:
           assert fresh['spec']['nodeName']==os.environ['KANAME_STAND_CLUSTER']+'-control-plane'
           spec={c['name']:c for c in fresh['spec']['initContainers']+fresh['spec']['containers']}
           statuses={c['name']:c for c in fresh['status']['initContainerStatuses']+fresh['status']['containerStatuses']}
+          node=fresh['spec']['nodeName']
+          version=subprocess.check_output(['docker','exec',node,'crictl','version'],timeout=25,text=True)
+          assert len(version)<=4096
+          runtime={}
+          for line in version.splitlines():
+              key,sep,value=line.partition(':'); assert sep and key in ['Version','RuntimeName','RuntimeVersion','RuntimeApiVersion'] and key not in runtime
+              value=value.strip(); assert value and len(value)<=256 and all(ord(c)>=32 for c in value)
+              runtime[key]=value
+          assert set(runtime)=={'Version','RuntimeName','RuntimeVersion','RuntimeApiVersion'}
+          print('KANAME_RUNTIME_VERSION '+json.dumps(runtime,sort_keys=True),flush=True)
           for name in ['migrate','kaname']:
               assert spec[name]['image']==os.environ['KANAME_IMAGE']
-              c=statuses[name]; assert c['imageID']
-              actual=get(['docker','exec',fresh['spec']['nodeName'],'crictl','inspecti',c['imageID']])['status']
+              c=statuses[name]; cid=c['containerID']
+              print('KANAME_CONTAINER_REFERENCE '+json.dumps({'name':name,'containerID':cid,'podImageID':c.get('imageID')},sort_keys=True),flush=True)
+              assert isinstance(cid,str) and re.fullmatch(r'containerd://[0-9a-f]{64}',cid)
+              cid=cid.removeprefix('containerd://')
+              observed=get(['docker','exec',node,'crictl','inspect',cid])
+              status=observed['status']; labels=status['labels']; metadata=status['metadata']
+              image=observed['info']['config']['image']
+              stored=image['image']; requested=image['user_specified_image']
+              print('KANAME_CONTAINER_IDENTITY '+json.dumps({'containerID':status['id'],'name':metadata['name'],'podUID':labels.get('io.kubernetes.pod.uid'),'podName':labels.get('io.kubernetes.pod.name'),'namespace':labels.get('io.kubernetes.pod.namespace'),'storedImageID':stored,'requestedImage':requested},sort_keys=True),flush=True)
+              assert status['id']==cid and metadata['name']==name
+              assert labels['io.kubernetes.pod.uid']==fresh['metadata']['uid']
+              assert labels['io.kubernetes.pod.name']==fresh['metadata']['name'] and labels['io.kubernetes.pod.namespace']=='kaname'
+              assert stored==os.environ['REGOP_KIND_CONFIG'] and requested==os.environ['KANAME_IMAGE']
+              actual=get(['docker','exec',node,'crictl','inspecti',stored])['status']
+              print('KANAME_CONTAINER_IMAGE_CONFIG '+json.dumps({'containerID':cid,'config':actual['id']},sort_keys=True),flush=True)
               assert actual['id']==os.environ['REGOP_KIND_CONFIG']
           assert statuses['migrate']['state']['terminated']['exitCode']==0 and statuses['kaname']['ready']
           print('KANAME_DEPLOYED_IMAGE '+json.dumps({'podUID':fresh['metadata']['uid'],'pin':os.environ['KANAME_IMAGE'],'config':os.environ['REGOP_KIND_CONFIG'],'containers':['migrate','kaname']},sort_keys=True))
