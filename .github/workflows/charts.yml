@@ -10,10 +10,12 @@ on:
     paths:
       - charts/**
       - .github/workflows/charts.yml
+      - .github/workflows/integration-kaname.yml
   pull_request:
     paths:
       - charts/**
       - .github/workflows/charts.yml
+      - .github/workflows/integration-kaname.yml
 
 permissions:
   contents: read
