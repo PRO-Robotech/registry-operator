@@ -97,9 +97,17 @@ type RoutePolicy struct {
 	BackendPort int32 `json:"backendPort"`
 }
 
+// LegacyPrefixTemplate identifies a trusted old revision with a shared prefix.
+// Such revisions are migration-only: overlapping VaultClaims cannot coexist.
+type LegacyPrefixTemplate struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
 // Config — параметры политики. Ставит платформа; те же значения —
 // параметры VAP в charts/registry-platform.
 type Config struct {
+	LegacyGlobalPrefixTemplates []LegacyPrefixTemplate `json:"legacyGlobalPrefixTemplates,omitempty"`
 	// ResourceNamePrefix — префикс имён ресурсов заказа: <prefix><id>.
 	ResourceNamePrefix string `json:"resourceNamePrefix"`
 	// AddonNamePrefix — префикс имени Addon заказа: <prefix><id>.
@@ -116,6 +124,13 @@ type Config struct {
 func (c *Config) Validate() error {
 	var errs []error
 	add := func(format string, args ...any) { errs = append(errs, fmt.Errorf(format, args...)) }
+	seen := map[LegacyPrefixTemplate]bool{}
+	for _, ref := range c.LegacyGlobalPrefixTemplates {
+		if len(ref.Name) > 42 || !dnsLabel.MatchString(ref.Name) || !regexp.MustCompile(`^v[0-9]{1,6}$`).MatchString(ref.Version) || seen[ref] {
+			add("legacyGlobalPrefixTemplates contains an invalid or duplicate exact template reference")
+		}
+		seen[ref] = true
+	}
 	if !namePrefix.MatchString(c.ResourceNamePrefix) {
 		add("resourceNamePrefix %q must match %s", c.ResourceNamePrefix, namePrefix)
 	}
@@ -239,10 +254,24 @@ func (c *Config) DestinationPath(login, id string) string {
 // LeafIdentityPath — путь листа ключей бакета в форме identityPaths
 // vault-operator: тот же лист, что DestinationPath, с подстановками учётки
 // вместо namespace и имени. Политика роли читает ровно лист своей учётки.
-func (c *Config) LeafIdentityPath() string {
+func (c *Config) LeafIdentityPath(prefix string) string {
 	leaf := strings.NewReplacer("{login}", "{serviceAccountNamespace}", "{name}", "{serviceAccountName}").Replace(c.Storage.DestinationPath)
-	return c.Secrets.KVMount + "/data/" + c.Secrets.SecretsPrefix + "/" + leaf
+	return c.Secrets.KVMount + "/data/" + prefix + "/" + leaf
 }
 
 // RoutePath — префикс пути маршрута заказа.
 func RoutePath(id string) string { return "/v2/" + id + "/" }
+
+// EffectiveSecretsPrefix selects one exact mode for both claims and their ACL.
+// Unknown template revisions use the isolated default; no global-or-scoped fallback.
+func (c *Config) EffectiveSecretsPrefix(o Order) (string, error) {
+	if !dnsLabel.MatchString(o.ID) {
+		return "", errors.New("invalid Registry ID for Vault prefix")
+	}
+	for _, ref := range c.LegacyGlobalPrefixTemplates {
+		if ref.Name == o.TemplateName && ref.Version == o.TemplateVersion {
+			return c.Secrets.SecretsPrefix, nil
+		}
+	}
+	return c.Secrets.SecretsPrefix + "/" + o.ID, nil
+}

@@ -7,7 +7,7 @@ description: >-
   module manifest of registry; and, off by default, the admission policies and
   the per-tenant Argo CD projects.
 type: application
-version: 1.0.0
+version: 1.0.1
 appVersion: "1.0.0"
 kubeVersion: ">=1.30.0-0"
 home: https://github.com/PRO-Robotech/registry-operator

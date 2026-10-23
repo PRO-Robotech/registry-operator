@@ -20,6 +20,6 @@ spec:
     managedBy: SYSTEM
     public: false
   vault:
-    secretsPrefix: clusters/site-a
+    secretsPrefix: clusters/site-a/abc123
     destinationPath: namespaces/cust01/apps/docker-registry/zot-abc123
   deletionPolicy: Retain

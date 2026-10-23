@@ -139,6 +139,8 @@ admission:
     s3Config: ""
     authMount: ""
     secretsPrefix: ""
+    kvMount: secret
+    legacyGlobalPrefixTemplates: []
   # Маршрут заказа: namespace края и переменные Addon. routeNamespace равен
   # site.edge.routeNamespace: только маршрутам этого namespace ReferenceGrant экземпляра
   # открывает Service zot-<id>; расхождение — отказ рендера.

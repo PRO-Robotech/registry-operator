@@ -289,3 +289,76 @@ func TestCheckRendered_OperatorKeysAreRefusedPerKind(t *testing.T) {
 		t.Fatal("a template for a read-only kind accepted: the operator does not write it")
 	}
 }
+
+func TestPerRegistryVaultPrefixAndExplicitLegacy(t *testing.T) {
+	cfg := sampleConfig(t)
+	o := order()
+	o.TemplateName = "zot-service"
+	o.TemplateVersion = "v5"
+	for _, tc := range []struct {
+		kind kinds.Kind
+		step string
+		path []string
+	}{
+		{kinds.S3BucketClaim, "storage", []string{"spec", "vault", "secretsPrefix"}},
+		{kinds.VaultClaim, "secrets", []string{"spec", "secretsPrefix"}},
+	} {
+		t.Run(tc.step, func(t *testing.T) {
+			good := goldenObject(t, tc.step)
+			if err := cfg.Policy.Check(tc.kind, o, good); err != nil {
+				t.Fatal(err)
+			}
+			for _, bad := range []string{"clusters/site-a", "clusters/site-a/other", "other/abc123", "clusters/site-a/abc123/extra"} {
+				twin := good.DeepCopy()
+				set(t, twin, bad, tc.path...)
+				if err := cfg.Policy.Check(tc.kind, o, twin); err == nil {
+					t.Fatalf("accepted foreign/mixed prefix %s", bad)
+				}
+			}
+			legacy := good.DeepCopy()
+			legacy.SetLabels(map[string]string{"registry.in-cloud.io/template": "zot-service-v1"})
+			set(t, legacy, "clusters/site-a", tc.path...)
+			if tc.step == "secrets" {
+				pols, _, _ := unstructured.NestedSlice(legacy.Object, "spec", "policies")
+				pols[0].(map[string]any)["identityPaths"].([]any)[0].(map[string]any)["path"] = "secret/data/clusters/site-a/namespaces/{serviceAccountNamespace}/apps/docker-registry/{serviceAccountName}"
+				set(t, legacy, pols, "spec", "policies")
+			}
+			cfg.Policy.LegacyGlobalPrefixTemplates = []policy.LegacyPrefixTemplate{{Name: "zot-service", Version: "v1"}}
+			if err := cfg.Policy.Check(tc.kind, o, legacy); err == nil {
+				t.Fatal("unlisted revision accepted global prefix")
+			}
+			wrongName := o
+			wrongName.TemplateName = "other"
+			wrongName.TemplateVersion = "v1"
+			if err := cfg.Policy.Check(tc.kind, wrongName, legacy); err == nil {
+				t.Fatal("wrong legacy name accepted global prefix")
+			}
+			old := o
+			old.TemplateVersion = "v1"
+			if err := cfg.Policy.Check(tc.kind, old, legacy); err != nil {
+				t.Fatal(err)
+			}
+			if err := cfg.Policy.Check(tc.kind, old, good); err == nil {
+				t.Fatal("legacy revision accepted scoped mode")
+			}
+			cfg.Policy.LegacyGlobalPrefixTemplates = nil
+		})
+	}
+}
+
+func TestLegacyPrefixReferencesFailClosed(t *testing.T) {
+	for _, refs := range [][]policy.LegacyPrefixTemplate{
+		{{Name: "", Version: "v1"}}, {{Name: "*", Version: "v1"}}, {{Name: "zot", Version: "*"}}, {{Name: "zot", Version: "v1"}, {Name: "zot", Version: "v1"}},
+	} {
+		cfg := sampleConfig(t)
+		cfg.Policy.LegacyGlobalPrefixTemplates = refs
+		if err := cfg.Policy.Validate(); err == nil {
+			t.Fatalf("accepted invalid refs %+v", refs)
+		}
+	}
+	cfg := sampleConfig(t)
+	cfg.Policy.LegacyGlobalPrefixTemplates = []policy.LegacyPrefixTemplate{{Name: "zot-service", Version: "v1"}}
+	if err := cfg.Policy.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}

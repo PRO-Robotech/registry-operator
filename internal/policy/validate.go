@@ -25,9 +25,11 @@ type Chart struct {
 
 // Order — то, что выведено из заказа и сверяется с объектом точно.
 type Order struct {
-	ID    string
-	Login string
-	UID   string
+	TemplateName    string
+	TemplateVersion string
+	ID              string
+	Login           string
+	UID             string
 	// SyncEpoch — эпоха синхронизации рабочей нагрузки.
 	SyncEpoch int64
 	// ServiceAccountName — имя IAMServiceAccount заказа (субъект выдачи).
@@ -210,8 +212,11 @@ func (c *Config) checkStorage(v *Violations, o Order, u *unstructured.Unstructur
 	if s.Region != "" && !slices.Contains(p.Regions, s.Region) {
 		v.add("spec.region", "must be one of %v", p.Regions)
 	}
-	if s.Vault.SecretsPrefix != p.SecretsPrefix {
-		v.add("spec.vault.secretsPrefix", "must be %q", p.SecretsPrefix)
+	prefix, err := c.EffectiveSecretsPrefix(o)
+	if err != nil {
+		v.add("spec.vault.secretsPrefix", "%s", err)
+	} else if s.Vault.SecretsPrefix != prefix {
+		v.add("spec.vault.secretsPrefix", "must be %q", prefix)
 	}
 	if want := c.DestinationPath(o.Login, o.ID); s.Vault.DestinationPath != want {
 		v.add("spec.vault.destinationPath", "must be %q", want)
@@ -283,8 +288,11 @@ func (c *Config) checkSecrets(v *Violations, o Order, u *unstructured.Unstructur
 	if s.VaultConfigRef.Name != p.VaultConfig {
 		v.add("spec.vaultConfigRef.name", "must be %q", p.VaultConfig)
 	}
-	if s.SecretsPrefix != p.SecretsPrefix {
-		v.add("spec.secretsPrefix", "must be %q", p.SecretsPrefix)
+	prefix, err := c.EffectiveSecretsPrefix(o)
+	if err != nil {
+		v.add("spec.secretsPrefix", "%s", err)
+	} else if s.SecretsPrefix != prefix {
+		v.add("spec.secretsPrefix", "must be %q", prefix)
 	}
 	if s.Auth.MountPath != p.AuthMount {
 		v.add("spec.auth.mountPath", "must be the platform mount %q", p.AuthMount)
@@ -299,7 +307,7 @@ func (c *Config) checkSecrets(v *Violations, o Order, u *unstructured.Unstructur
 		v.add("spec.auth.rolePruning", "must be Owned: the order removes only its own role")
 	}
 	own := map[string]bool{}
-	leaf := c.LeafIdentityPath()
+	leaf := c.LeafIdentityPath(prefix)
 	for i, pol := range s.Policies {
 		f := fmt.Sprintf("spec.policies[%d]", i)
 		if !strings.HasPrefix(pol.Name, name+"-") || !dnsLabel.MatchString(strings.TrimPrefix(pol.Name, name+"-")) {

@@ -112,7 +112,7 @@ objects:
         bucket: cust01-zot-abc123
         endpoint: https://s3.example.test
         region: ru-1
-        vaultSecretPath: secret/data/clusters/example/namespaces/cust01/apps/docker-registry/zot-abc123
+        vaultSecretPath: secret/data/clusters/example/abc123/namespaces/cust01/apps/docker-registry/zot-abc123
         vaultAuthMount: kubernetes-tenants
         vaultRole: zot-abc123
   layer: &layer
@@ -148,12 +148,12 @@ objects:
       labels: {registry.in-cloud.io/id: abc123, registry.in-cloud.io/namespace: cust01}
     spec:
       vaultConfigRef: {name: default}
-      secretsPrefix: clusters/example
+      secretsPrefix: clusters/example/abc123
       auth: {mountPath: kubernetes-tenants, manageConfig: false, autoCreate: false, rolePruning: Owned}
       policies:
         - name: zot-abc123-kv
           identityPaths:
-            - path: secret/data/clusters/example/namespaces/{serviceAccountNamespace}/apps/docker-registry/{serviceAccountName}
+            - path: secret/data/clusters/example/abc123/namespaces/{serviceAccountNamespace}/apps/docker-registry/{serviceAccountName}
               capabilities: [read]
       roles:
         - name: zot-abc123
@@ -175,7 +175,7 @@ objects:
       clusterRef: {name: zot-abc123}
       customerLogin: cust01
       bucket: {public: false, managedBy: SYSTEM}
-      vault: {secretsPrefix: clusters/example, destinationPath: namespaces/cust01/apps/docker-registry/zot-abc123}
+      vault: {secretsPrefix: clusters/example/abc123, destinationPath: namespaces/cust01/apps/docker-registry/zot-abc123}
       deletionPolicy: Retain
   app: &app
     apiVersion: argoproj.io/v1alpha1
@@ -287,3 +287,11 @@ cases:
 # Политики, чьи виды дают CRD registry-operator (полоса оператора): без них в ветке
 # пробы этих политик «не выполнились», а не зелёные.
 needsRegistryCRDs: [v2-registry-status, v6-registry-reservations, v7-registry-annotations]
+
+  - {name: v14-bucket-cross-id-prefix, policy: v14-registry-vault-claims, as: operator, verb: create, expect: deny, object: *bucket, set: {spec.vault.secretsPrefix: clusters/example/def456}}
+  - {name: v14-bucket-global-unlisted, policy: v14-registry-vault-claims, as: operator, verb: create, expect: deny, object: *bucket, set: {spec.vault.secretsPrefix: clusters/example}}
+  - {name: v14-vault-cross-id-prefix, policy: v14-registry-vault-claims, as: operator, verb: create, expect: deny, object: *vaultclaim, set: {spec.secretsPrefix: clusters/example/def456}}
+  - {name: v14-bucket-legacy-exact-twin, policy: v14-registry-vault-claims, as: operator, verb: create, expect: allow, object: *bucket, set: {spec.vault.secretsPrefix: clusters/example, metadata.labels.registry.in-cloud.io/template: legacy-v1}}
+  - {name: v14-bucket-legacy-wrong-version, policy: v14-registry-vault-claims, as: operator, verb: create, expect: deny, object: *bucket, set: {spec.vault.secretsPrefix: clusters/example, metadata.labels.registry.in-cloud.io/template: legacy-v2}}
+  - {name: v14-bucket-legacy-wrong-name, policy: v14-registry-vault-claims, as: operator, verb: create, expect: deny, object: *bucket, set: {spec.vault.secretsPrefix: clusters/example, metadata.labels.registry.in-cloud.io/template: other-v1}}
+  - {name: v14-bucket-legacy-mixed-mode, policy: v14-registry-vault-claims, as: operator, verb: create, expect: deny, object: *bucket, set: {metadata.labels.registry.in-cloud.io/template: legacy-v1}}

@@ -174,3 +174,11 @@ ConfigMap `<release>-admission` в `admission.paramsNamespace`, без пара�
 (`charts/tests/golden/platform-*.yaml`), отрицательные пробы значений, проверки формы (в том
 числе манифест модуля: без раздела типов, роли с `children`, личность модуля), схемы по закреплённым CRD,
 отсутствие Lua; `charts/tests/admission/run.sh` — политики на кластере.
+
+Vault claim admission derives the expected prefix from the Registry ID label:
+`admission.vault.secretsPrefix + '/' + registry.in-cloud.io/id`. Its ACL must
+reference that same prefix and `admission.vault.kvMount` (default `secret`).
+`admission.vault.legacyGlobalPrefixTemplates` is an explicit list of exact
+`{name, version}` pairs that still require the global prefix. Mirror the operator
+configuration exactly. Legacy parent prefixes cannot coexist with descendant
+claims; retire those legacy orders before enabling new isolated orders.

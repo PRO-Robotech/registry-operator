@@ -12,7 +12,7 @@ spec:
   value: |
     vaultConfigRef:
       name: {{ .Params.secrets.vaultConfig | toJson }}
-    secretsPrefix: {{ .Params.secrets.secretsPrefix | toJson }}
+    secretsPrefix: {{ printf "%s/%s" .Params.secrets.secretsPrefix .ID | toJson }}
     auth:
       mountPath: {{ .Params.secrets.authMount | toJson }}
       manageConfig: false
@@ -21,7 +21,7 @@ spec:
     policies:
     - name: {{ printf "zot-%s-leaf" .ID | toJson }}
       identityPaths:
-      - path: {{ printf "%s/data/%s/namespaces/{serviceAccountNamespace}/apps/docker-registry/{serviceAccountName}" .Params.secrets.kvMount .Params.secrets.secretsPrefix | toJson }}
+      - path: {{ printf "%s/data/%s/%s/namespaces/{serviceAccountNamespace}/apps/docker-registry/{serviceAccountName}" .Params.secrets.kvMount .Params.secrets.secretsPrefix .ID | toJson }}
         capabilities: [read]
     roles:
     - name: {{ printf "zot-%s" .ID | toJson }}

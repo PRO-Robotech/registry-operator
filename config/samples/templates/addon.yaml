@@ -47,6 +47,6 @@ spec:
       bucket: {{ .Status.S3BucketClaim.Status.bucketName | toJson }}
       endpoint: {{ .Status.S3BucketClaim.Status.endpoint | toJson }}
       region: {{ .Params.storage.region | toJson }}
-      vaultSecretPath: {{ printf "%s/data/%s/namespaces/%s/apps/docker-registry/zot-%s" .Params.secrets.kvMount .Params.secrets.secretsPrefix .Login .ID | toJson }}
+      vaultSecretPath: {{ printf "%s/data/%s/%s/namespaces/%s/apps/docker-registry/zot-%s" .Params.secrets.kvMount .Params.secrets.secretsPrefix .ID .Login .ID | toJson }}
       vaultAuthMount: {{ .Status.VaultClaim.Status.vault.authMountPath | toJson }}
       vaultRole: {{ .Status.VaultClaim.Name | toJson }}

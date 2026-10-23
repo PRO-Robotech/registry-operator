@@ -55,6 +55,6 @@ spec:
     bucket: cust01-zot-abc123
     endpoint: https://s3.example.test
     region: ru-1
-    vaultSecretPath: secret/data/clusters/site-a/namespaces/cust01/apps/docker-registry/zot-abc123
+    vaultSecretPath: secret/data/clusters/site-a/abc123/namespaces/cust01/apps/docker-registry/zot-abc123
     vaultAuthMount: kubernetes-site-a
     vaultRole: zot-abc123

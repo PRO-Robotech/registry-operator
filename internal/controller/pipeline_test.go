@@ -622,3 +622,36 @@ func TestTemplates_RevisionWithoutARegionIsNotResolved(t *testing.T) {
 
 // regionLine — строка region раздела storage параметров ревизии примеров.
 var regionLine = regexp.MustCompile(`(?m)^(  region: ).*$`)
+
+// A refused guest VaultClaim never reports top-level observedGeneration. Its
+// Retain finalizer is nevertheless safe to run; it must not strand the order.
+func TestDeletion_RetainUnobservedSecrets(t *testing.T) {
+	const ns, id = "retainfailed", "retainfa"
+	tenant(t, ns, "prj-retain", "acc-retain")
+	order(t, ns, id, nil)
+	ch := children(ns, id)
+	eventually(t, wait, "storage", func() error { return exists(ch[registryv1alpha1.StepStorage]) })
+	markReady(t, ch[registryv1alpha1.StepStorage])
+	eventually(t, wait, "unobserved guest", func() error { return exists(ch[registryv1alpha1.StepSecrets]) })
+	hold(t, ch[registryv1alpha1.StepSecrets])
+	u, err := get(ch[registryv1alpha1.StepSecrets])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, found, _ := unstructured.NestedInt64(u.Object, "status", "observedGeneration"); found {
+		t.Fatal("fixture must be unobserved")
+	}
+	if err := k8s.Delete(ctx(), registry(t, ns, id)); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, wait, "Retain child finalizer entered without observedGeneration", func() error {
+		u, err := get(ch[registryv1alpha1.StepSecrets])
+		if err != nil {
+			return err
+		}
+		if u.GetDeletionTimestamp() == nil {
+			return fmt.Errorf("Retain child still waiting for observation")
+		}
+		return nil
+	})
+}

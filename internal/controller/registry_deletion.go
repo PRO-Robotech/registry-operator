@@ -178,6 +178,11 @@ func (r *RegistryReconciler) settleDeletionPolicy(ctx context.Context, k kinds.K
 			pending = true
 			continue
 		}
+		// Retain finalization does not destroy retained data. A refused child
+		// may never report observedGeneration, but must still be removable.
+		if want == string(registryv1alpha1.DeletionPolicyRetain) {
+			continue
+		}
 		og, _, _ := unstructured.NestedInt64(o.Object, "status", "observedGeneration")
 		if og < o.GetGeneration() {
 			pending = true

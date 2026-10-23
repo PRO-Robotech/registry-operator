@@ -32,3 +32,20 @@ Deployment, два Certificate cert-manager и NetworkPolicy: вход на эн
   вместе с рабочей нагрузкой; оператор пишет ровно шесть видов и ReferenceGrant не пишет;
 - центр серверного сертификата эндпоинта заявок — в namespace арендатора, для iam-proxy
   (`--enroll-ca`).
+
+### Vault prefix isolation and legacy migration
+
+`config.policy.storage.secretsPrefix` and `config.policy.secrets.secretsPrefix`
+are the same trusted base. New Registry template revisions must render both
+claim prefixes as `<base>/<Registry.spec.id>`. The Vault policy and workload
+secret path must use that exact prefix; sibling IDs and arbitrary prefixes are
+refused.
+
+For an already provisioned legacy Registry only, configure
+`config.policy.legacyGlobalPrefixTemplates` with exact `{name, version}` pairs.
+Listed revisions require the old global prefix, while all other revisions require
+per-Registry isolation. This is migration compatibility, not concurrent isolation:
+a broad legacy VaultClaim owns its descendants. Purge or otherwise retire legacy
+orders through their normal lifecycle before creating isolated descendants.
+Never edit immutable claim prefixes in place. Keep the matching admission
+`vault.legacyGlobalPrefixTemplates` list aligned with the operator configuration.

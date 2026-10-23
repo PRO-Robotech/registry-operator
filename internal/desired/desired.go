@@ -128,6 +128,8 @@ func Labels(reg *registryv1alpha1.Registry, tpl registryv1alpha1.TemplateRef, st
 // Order — сверяемое политикой из входа.
 func (in Input) Order(chart policy.Chart) policy.Order {
 	return policy.Order{
+		TemplateName:       in.Template.Name,
+		TemplateVersion:    in.Template.Version,
 		ID:                 in.Registry.Spec.ID,
 		Login:              in.Registry.Namespace,
 		UID:                string(in.Registry.UID),

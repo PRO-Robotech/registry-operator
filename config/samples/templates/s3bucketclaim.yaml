@@ -16,5 +16,5 @@ spec:
       managedBy: SYSTEM
       public: false
     vault:
-      secretsPrefix: {{ .Params.storage.secretsPrefix | toJson }}
+      secretsPrefix: {{ printf "%s/%s" .Params.storage.secretsPrefix .ID | toJson }}
       destinationPath: {{ printf "namespaces/%s/apps/docker-registry/zot-%s" .Login .ID | toJson }}
