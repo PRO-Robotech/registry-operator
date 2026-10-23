@@ -284,10 +284,6 @@ cases:
   - {name: v15-stranger-refreshes-app, policy: v15-registry-applications, as: stranger, verb: patch, expect: allow, kind: applications.argoproj.io, namespace: argocd, target: reg-abc123, patch: {metadata: {annotations: {argocd.argoproj.io/refresh: normal}}}}
   - {name: v15-stranger-deletes-app, policy: v15-registry-applications, as: stranger, verb: delete, expect: deny, kind: applications.argoproj.io, namespace: argocd, target: reg-abc123}
 
-# Политики, чьи виды дают CRD registry-operator (полоса оператора): без них в ветке
-# пробы этих политик «не выполнились», а не зелёные.
-needsRegistryCRDs: [v2-registry-status, v6-registry-reservations, v7-registry-annotations]
-
   - {name: v14-bucket-cross-id-prefix, policy: v14-registry-vault-claims, as: operator, verb: create, expect: deny, object: *bucket, set: {spec.vault.secretsPrefix: clusters/example/def456}}
   - {name: v14-bucket-global-unlisted, policy: v14-registry-vault-claims, as: operator, verb: create, expect: deny, object: *bucket, set: {spec.vault.secretsPrefix: clusters/example}}
   - {name: v14-vault-cross-id-prefix, policy: v14-registry-vault-claims, as: operator, verb: create, expect: deny, object: *vaultclaim, set: {spec.secretsPrefix: clusters/example/def456}}
@@ -295,3 +291,8 @@ needsRegistryCRDs: [v2-registry-status, v6-registry-reservations, v7-registry-an
   - {name: v14-bucket-legacy-wrong-version, policy: v14-registry-vault-claims, as: operator, verb: create, expect: deny, object: *bucket, set: {spec.vault.secretsPrefix: clusters/example, metadata.labels.registry.in-cloud.io/template: legacy-v2}}
   - {name: v14-bucket-legacy-wrong-name, policy: v14-registry-vault-claims, as: operator, verb: create, expect: deny, object: *bucket, set: {spec.vault.secretsPrefix: clusters/example, metadata.labels.registry.in-cloud.io/template: other-v1}}
   - {name: v14-bucket-legacy-mixed-mode, policy: v14-registry-vault-claims, as: operator, verb: create, expect: deny, object: *bucket, set: {metadata.labels.registry.in-cloud.io/template: legacy-v1}}
+
+
+# Политики, чьи виды дают CRD registry-operator (полоса оператора): без них в ветке
+# пробы этих политик «не выполнились», а не зелёные.
+needsRegistryCRDs: [v2-registry-status, v6-registry-reservations, v7-registry-annotations]
