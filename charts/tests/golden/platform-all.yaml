@@ -12,7 +12,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
 data:
   registryOperator: "system:serviceaccount:registry-system:registry-operator"
   addonsOperator: "system:serviceaccount:addons-system:addons-operator"
@@ -27,6 +27,8 @@ data:
   s3Config: "s3-default"
   authMount: "kubernetes-tenants"
   secretsPrefix: "clusters/example"
+  kvMount: "secret"
+  legacyGlobalPrefixTemplates: ""
   routeNamespace: "registry-edge"
   routeHost: "registry.example.test"
   gatewayName: "registry-gw"
@@ -62,7 +64,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     # По этой метке чарт kaname собирает каталог доставки манифестов из нескольких
     # ConfigMap; каждый ключ — файл <модуль>.manifest.yaml.
     kaname.in-cloud.io/module-manifest: "true"
@@ -84,7 +86,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
 spec:
   rules:
     - name: edge
@@ -118,7 +120,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     registry.in-cloud.io/chart: "registry-instance"
     registry.in-cloud.io/chart-version: "1.0.0"
   annotations:
@@ -137,7 +139,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     addons.in-cloud.io/addon: "registry-platform"
     addons.in-cloud.io/values: edge
 spec:
@@ -158,7 +160,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     addons.in-cloud.io/addon: "registry-instance"
     addons.in-cloud.io/values: order
 spec:
@@ -176,7 +178,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     addons.in-cloud.io/addon: "registry-instance"
     addons.in-cloud.io/values: site
 spec:
@@ -196,7 +198,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     registry.in-cloud.io/tenant: "cust01"
 spec:
   description: "On-demand registries of tenant cust01"
@@ -232,7 +234,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     registry.in-cloud.io/tenant: "cust02"
 spec:
   description: "On-demand registries of tenant cust02"
@@ -267,7 +269,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
 spec:
   gatewayClassName: "envoy-gateway"
   listeners:
@@ -302,7 +304,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
 spec:
   parentRefs:
     - group: gateway.networking.k8s.io
@@ -336,7 +338,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
 spec:
   parentRefs:
     - group: gateway.networking.k8s.io
@@ -370,7 +372,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
 spec:
   from:
     - group: gateway.networking.k8s.io
@@ -393,7 +395,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
 spec:
   from:
     - group: gateway.networking.k8s.io
@@ -415,7 +417,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     registry.in-cloud.io/policy: "v1"
 spec:
   failurePolicy: Fail
@@ -469,7 +471,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     registry.in-cloud.io/policy: "v2"
 spec:
   failurePolicy: Fail
@@ -503,7 +505,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     registry.in-cloud.io/policy: "v3"
 spec:
   failurePolicy: Fail
@@ -545,7 +547,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     registry.in-cloud.io/policy: "v4"
 spec:
   failurePolicy: Fail
@@ -584,7 +586,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     registry.in-cloud.io/policy: "v5"
 spec:
   failurePolicy: Fail
@@ -618,7 +620,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     registry.in-cloud.io/policy: "v6"
 spec:
   failurePolicy: Fail
@@ -652,7 +654,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     registry.in-cloud.io/policy: "v7"
 spec:
   failurePolicy: Fail
@@ -690,7 +692,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     registry.in-cloud.io/policy: "v8"
 spec:
   failurePolicy: Fail
@@ -749,7 +751,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     registry.in-cloud.io/policy: "v9"
 spec:
   failurePolicy: Fail
@@ -789,7 +791,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     registry.in-cloud.io/policy: "v10"
 spec:
   failurePolicy: Fail
@@ -848,7 +850,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     registry.in-cloud.io/policy: "v11"
 spec:
   failurePolicy: Fail
@@ -887,7 +889,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     registry.in-cloud.io/policy: "v12"
 spec:
   failurePolicy: Fail
@@ -924,7 +926,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     registry.in-cloud.io/policy: "v13"
 spec:
   failurePolicy: Fail
@@ -964,7 +966,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     registry.in-cloud.io/policy: "v14"
 spec:
   failurePolicy: Fail
@@ -987,14 +989,25 @@ spec:
       expression: "request.userInfo.username == params.data.registryOperator"
     - name: "isPlatform"
       expression: "request.userInfo.username in params.data.platformUsers.split(',') || request.userInfo.groups.exists(g, g in params.data.platformGroups.split(','))"
+    - name: "claim"
+      expression: "request.operation == 'DELETE' ? oldObject : object"
+    - name: "registryID"
+      expression: "variables.claim.metadata.?labels[?'registry.in-cloud.io/id'].orValue('')"
+    - name: "legacyPrefix"
+      expression: "variables.claim.metadata.?labels[?'registry.in-cloud.io/template'].orValue('') != '' \u0026\u0026 variables.claim.metadata.?labels[?'registry.in-cloud.io/template'].orValue('') in params.data.legacyGlobalPrefixTemplates.split(',')"
+    - name: "vaultPrefix"
+      expression: "params.data.secretsPrefix + (variables.legacyPrefix ? '' : '/' + variables.registryID)"
   validations:
+    - expression: "request.operation == 'DELETE' || !variables.isOp || (variables.registryID.matches('^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$') \u0026\u0026 object.metadata.name == 'zot-' + variables.registryID)"
+      message: "registry claims must bind their exact Registry ID"
+      reason: Forbidden
     - expression: "variables.isOp || variables.isPlatform || (request.operation == 'UPDATE' \u0026\u0026 (has(object.spec) == has(oldObject.spec) \u0026\u0026 (!has(object.spec) || object.spec == oldObject.spec)) \u0026\u0026 (has(object.metadata.labels) == has(oldObject.metadata.labels) \u0026\u0026 (!has(object.metadata.labels) || object.metadata.labels == oldObject.metadata.labels)))"
       message: "zot-* Vault claims are written only by registry-operator; other writers may change only metadata outside labels"
       reason: Forbidden
-    - expression: "request.resource.resource != 'vaultclaims' || request.operation == 'DELETE' || !variables.isOp || (object.spec.vaultConfigRef.name == params.data.vaultConfig \u0026\u0026 object.spec.secretsPrefix == params.data.secretsPrefix \u0026\u0026 object.spec.auth.mountPath == params.data.authMount \u0026\u0026 has(object.spec.auth.manageConfig) \u0026\u0026 !object.spec.auth.manageConfig \u0026\u0026 !object.spec.auth.?autoCreate.orValue(false) \u0026\u0026 object.spec.auth.?rolePruning.orValue('') == 'Owned' \u0026\u0026 !has(object.spec.transit) \u0026\u0026 !has(object.spec.clusterRef) \u0026\u0026 size(object.spec.roles) == 1 \u0026\u0026 object.spec.roles[0].name == object.metadata.name \u0026\u0026 object.spec.roles[0].boundServiceAccounts.?names.orValue([]) == [object.metadata.name] \u0026\u0026 object.spec.roles[0].boundServiceAccounts.namespace == request.namespace \u0026\u0026 object.spec.roles[0].?policies.orValue([]).all(p, object.spec.?policies.orValue([]).exists(q, q.name == p)) \u0026\u0026 object.spec.?policies.orValue([]).all(q, q.name.startsWith(object.metadata.name + '-') \u0026\u0026 !has(q.rules) \u0026\u0026 q.?identityPaths.orValue([]).all(ip, ip.path.endsWith('/namespaces/{serviceAccountNamespace}/apps/docker-registry/{serviceAccountName}') \u0026\u0026 ip.capabilities.all(c, c == 'read'))))"
+    - expression: "request.resource.resource != 'vaultclaims' || request.operation == 'DELETE' || !variables.isOp || (object.spec.vaultConfigRef.name == params.data.vaultConfig \u0026\u0026 object.spec.secretsPrefix == variables.vaultPrefix \u0026\u0026 object.spec.auth.mountPath == params.data.authMount \u0026\u0026 has(object.spec.auth.manageConfig) \u0026\u0026 !object.spec.auth.manageConfig \u0026\u0026 !object.spec.auth.?autoCreate.orValue(false) \u0026\u0026 object.spec.auth.?rolePruning.orValue('') == 'Owned' \u0026\u0026 !has(object.spec.transit) \u0026\u0026 !has(object.spec.clusterRef) \u0026\u0026 size(object.spec.roles) == 1 \u0026\u0026 object.spec.roles[0].name == object.metadata.name \u0026\u0026 object.spec.roles[0].boundServiceAccounts.?names.orValue([]) == [object.metadata.name] \u0026\u0026 object.spec.roles[0].boundServiceAccounts.namespace == request.namespace \u0026\u0026 object.spec.roles[0].?policies.orValue([]).all(p, object.spec.?policies.orValue([]).exists(q, q.name == p)) \u0026\u0026 object.spec.?policies.orValue([]).all(q, q.name.startsWith(object.metadata.name + '-') \u0026\u0026 !has(q.rules) \u0026\u0026 q.?identityPaths.orValue([]).all(ip, ip.path == params.data.kvMount + '/data/' + variables.vaultPrefix + '/namespaces/{serviceAccountNamespace}/apps/docker-registry/{serviceAccountName}' \u0026\u0026 ip.capabilities.all(c, c == 'read'))))"
       message: "a registry Vault claim is a guest on the platform mount with one role for its own service account, reading only its own leaf"
       reason: Forbidden
-    - expression: "request.resource.resource != 's3bucketclaims' || request.operation == 'DELETE' || !variables.isOp || (object.spec.vaultConfigRef.name == params.data.s3Config \u0026\u0026 object.spec.customerLogin == request.namespace \u0026\u0026 object.spec.vault.secretsPrefix == params.data.secretsPrefix \u0026\u0026 object.spec.vault.destinationPath == 'namespaces/' + request.namespace + '/apps/docker-registry/' + object.metadata.name \u0026\u0026 !object.spec.?bucket.?public.orValue(false) \u0026\u0026 !has(object.spec.bucket.name))"
+    - expression: "request.resource.resource != 's3bucketclaims' || request.operation == 'DELETE' || !variables.isOp || (object.spec.vaultConfigRef.name == params.data.s3Config \u0026\u0026 object.spec.customerLogin == request.namespace \u0026\u0026 object.spec.vault.secretsPrefix == variables.vaultPrefix \u0026\u0026 object.spec.vault.destinationPath == 'namespaces/' + request.namespace + '/apps/docker-registry/' + object.metadata.name \u0026\u0026 !object.spec.?bucket.?public.orValue(false) \u0026\u0026 !has(object.spec.bucket.name))"
       message: "a registry bucket is private, new and writes its keys only to its own leaf"
       reason: Forbidden
 ---
@@ -1009,7 +1022,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     registry.in-cloud.io/policy: "v15"
 spec:
   failurePolicy: Fail
@@ -1050,7 +1063,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     registry.in-cloud.io/policy: "v1"
 spec:
   policyName: "v1-registry-iam"
@@ -1070,7 +1083,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     registry.in-cloud.io/policy: "v2"
 spec:
   policyName: "v2-registry-status"
@@ -1090,7 +1103,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     registry.in-cloud.io/policy: "v3"
 spec:
   policyName: "v3-registry-route"
@@ -1110,7 +1123,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     registry.in-cloud.io/policy: "v4"
 spec:
   policyName: "v4-registry-zot-pods"
@@ -1130,7 +1143,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     registry.in-cloud.io/policy: "v5"
 spec:
   policyName: "v5-registry-tenant-namespaces"
@@ -1150,7 +1163,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     registry.in-cloud.io/policy: "v6"
 spec:
   policyName: "v6-registry-reservations"
@@ -1170,7 +1183,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     registry.in-cloud.io/policy: "v7"
 spec:
   policyName: "v7-registry-annotations"
@@ -1190,7 +1203,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     registry.in-cloud.io/policy: "v8"
 spec:
   policyName: "v8-registry-zot-workload"
@@ -1210,7 +1223,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     registry.in-cloud.io/policy: "v9"
 spec:
   policyName: "v9-registry-tracking"
@@ -1230,7 +1243,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     registry.in-cloud.io/policy: "v10"
 spec:
   policyName: "v10-registry-addons"
@@ -1250,7 +1263,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     registry.in-cloud.io/policy: "v11"
 spec:
   policyName: "v11-registry-addonvalues"
@@ -1270,7 +1283,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     registry.in-cloud.io/policy: "v12"
 spec:
   policyName: "v12-registry-addonphases"
@@ -1290,7 +1303,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     registry.in-cloud.io/policy: "v13"
 spec:
   policyName: "v13-registry-appprojects"
@@ -1310,7 +1323,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     registry.in-cloud.io/policy: "v14"
 spec:
   policyName: "v14-registry-vault-claims"
@@ -1330,7 +1343,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     registry.in-cloud.io/policy: "v15"
 spec:
   policyName: "v15-registry-applications"

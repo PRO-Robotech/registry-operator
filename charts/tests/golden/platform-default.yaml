@@ -15,7 +15,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     # По этой метке чарт kaname собирает каталог доставки манифестов из нескольких
     # ConfigMap; каждый ключ — файл <модуль>.manifest.yaml.
     kaname.in-cloud.io/module-manifest: "true"
@@ -37,7 +37,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
 spec:
   rules:
     - name: edge
@@ -71,7 +71,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     registry.in-cloud.io/chart: "registry-instance"
     registry.in-cloud.io/chart-version: "1.0.0"
   annotations:
@@ -90,7 +90,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     addons.in-cloud.io/addon: "registry-platform"
     addons.in-cloud.io/values: edge
 spec:
@@ -111,7 +111,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     addons.in-cloud.io/addon: "registry-instance"
     addons.in-cloud.io/values: order
 spec:
@@ -129,7 +129,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
     addons.in-cloud.io/addon: "registry-instance"
     addons.in-cloud.io/values: site
 spec:
@@ -148,7 +148,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
 spec:
   gatewayClassName: "envoy-gateway"
   listeners:
@@ -183,7 +183,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
 spec:
   parentRefs:
     - group: gateway.networking.k8s.io
@@ -217,7 +217,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
 spec:
   parentRefs:
     - group: gateway.networking.k8s.io
@@ -251,7 +251,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
 spec:
   from:
     - group: gateway.networking.k8s.io
@@ -274,7 +274,7 @@ metadata:
     app.kubernetes.io/instance: "registry-platform"
     app.kubernetes.io/part-of: registry
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "registry-platform-1.0.0"
+    helm.sh/chart: "registry-platform-1.0.1"
 spec:
   from:
     - group: gateway.networking.k8s.io
