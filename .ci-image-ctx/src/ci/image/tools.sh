@@ -37,7 +37,7 @@ key() { printf '%s\n' "$*" >> "$tools"; echo "ci/image/tools.sh: в образе
 key pip pyyaml==6.0.2 yamllint==1.35.1 yamale==5.3.0
 [ "$(helm version --template '{{.Version}}')" = "${HELM_VERSION:?}" ] || { echo "ci/image/tools.sh: helm не $HELM_VERSION" >&2; exit 1; }
 key helm "$HELM_VERSION"
-yq --version | grep -q ' v4\.45\.1$' || { echo "ci/image/tools.sh: yq не v4.45.1 — $(yq --version)" >&2; exit 1; }
+yqv=$(yq --version) && grep -q ' v4\.45\.1$' <<<"$yqv" || { echo "ci/image/tools.sh: yq не v4.45.1 — $(yq --version)" >&2; exit 1; }
 key yq v4.45.1
 key go-mod "$(sed -n 's/^module //p' go.mod)" all
 for f in "$root"/bin/*; do key localbin "${f##*/}"; done
