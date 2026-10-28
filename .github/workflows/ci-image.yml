@@ -1,0 +1,76 @@
+# Образ заданий CI registry-operator (#70): docker.io/prorobotech/registry-operator:ci-<тег>.
+# Ветка ci-image несёт ровно контекст сборки (.ci-image-ctx/, его выписывает ci/image/ctx.sh build
+# в дереве регопа) и ci/image/ctx.sh; тег — ctx.sh tag, та же сумма, что считает задание
+# ci-image-ref конвейера GitLab: оно берёт образ отсюда по digest, а нет его — собирает сам.
+# Тег — сумма входа: уже опубликованный не пересобирается и не перезаписывается.
+# Действия — по полному SHA коммита (версия — комментарием): задание держит учётку публикации Docker
+# Hub, а тег действия переставляем.
+name: ci-image
+
+on:
+  push:
+    branches: [ci-image]
+    paths:
+      - .ci-image-ctx/**
+      - ci/image/ctx.sh
+      - .github/workflows/ci-image.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-image
+  cancel-in-progress: false
+
+jobs:
+  image:
+    name: CI image
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - id: tag
+        name: tag of the build context
+        run: |
+          tag=$(bash ci/image/ctx.sh tag .ci-image-ctx)
+          helm=$(sed -n 's/^HELM_VERSION=//p' .ci-image-ctx/build-args)
+          [ -n "$helm" ] || { echo "build-args: HELM_VERSION missing" >&2; exit 1; }
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "helm=$helm" >> "$GITHUB_OUTPUT"
+          echo "ci-image: tag ci-$tag, HELM_VERSION $helm"
+      - id: hub
+        name: tag already published
+        env:
+          TAG: ci-${{ steps.tag.outputs.tag }}
+        run: |
+          repo=prorobotech/registry-operator
+          token=$(curl -fsS "https://auth.docker.io/token?service=registry.docker.io&scope=repository:$repo:pull" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+          [ -n "$token" ] || { echo "Docker Hub: no pull token" >&2; exit 1; }
+          code=$(printf 'header = "Authorization: Bearer %s"\n' "$token" | curl -sS -K - -o /dev/null -w '%{http_code}' -I \
+            -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.docker.distribution.manifest.list.v2+json' \
+            "https://registry-1.docker.io/v2/$repo/manifests/$TAG")
+          case "$code" in
+            200) echo "exists=true" >> "$GITHUB_OUTPUT"; echo "ci-image: $repo:$TAG is published — no build" ;;
+            404) echo "exists=false" >> "$GITHUB_OUTPUT"; echo "ci-image: $repo:$TAG is not published — build" ;;
+            *) echo "Docker Hub: manifest $TAG answered HTTP $code" >&2; exit 1 ;;
+          esac
+      - if: steps.hub.outputs.exists == 'false'
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - if: steps.hub.outputs.exists == 'false'
+        name: login to Docker Hub
+        env:
+          USER: ${{ secrets.DOCKERHUB_USERNAME }}
+          TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -z "$USER" ] || [ -z "$TOKEN" ]; then echo "DOCKERHUB_USERNAME or DOCKERHUB_TOKEN is not set — nothing to publish with" >&2; exit 1; fi
+          echo "$TOKEN" | docker login -u "$USER" --password-stdin
+      - if: steps.hub.outputs.exists == 'false'
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .ci-image-ctx
+          file: .ci-image-ctx/Dockerfile
+          build-args: HELM_VERSION=${{ steps.tag.outputs.helm }}
+          push: true
+          provenance: false
+          labels: org.opencontainers.image.revision=${{ github.sha }}
+          tags: prorobotech/registry-operator:ci-${{ steps.tag.outputs.tag }}

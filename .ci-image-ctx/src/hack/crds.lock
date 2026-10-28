@@ -1,0 +1,17 @@
+# Целевые CRD проб envtest: путь в bin/crds, sha256, источник по закреплённой
+# ревизии. Источники — публичные репозитории; файл скачивается и сверяется
+# по sha256 (hack/fetch-crds.sh), копии в дереве нет.
+#   vault-operator@5f0fd9f4723e (ветка 13-final-assembly; ревизия образа стенда
+#     prorobotech/vault-operator:13-final-assembly-5f0fd9f4; гостевой режим VaultClaim,
+#     names[], identityPaths, rolePruning=Owned);
+#   addons-operator@22b73fde37e6 (main);
+#   Gateway API v1.5.1 (standard-install: из него envtest берёт только CRD);
+#   Cilium v1.19.4 (политики чарта registry-operator: kind-e2e ставит чарт, и
+#     CiliumNetworkPolicy с CiliumClusterwideNetworkPolicy должны быть известны
+#     серверу API; исполняет их только Cilium площадки).
+vault.in-cloud.io_s3bucketclaims.yaml cbc6bb033bfb24bfdb9bd79bebe501bd7e62b7d2a75f9f23099ef598fa606e61 https://raw.githubusercontent.com/PRO-Robotech/vault-operator/5f0fd9f4723e69dfd565b533a8901c87f46c6dca/config/crd/bases/vault.in-cloud.io_s3bucketclaims.yaml
+vault.in-cloud.io_vaultclaims.yaml 51eacf1c4dc5b0b18348876436ab9b5ec385814126a461629d9655c797363b65 https://raw.githubusercontent.com/PRO-Robotech/vault-operator/5f0fd9f4723e69dfd565b533a8901c87f46c6dca/config/crd/bases/vault.in-cloud.io_vaultclaims.yaml
+addons.in-cloud.io_addons.yaml c6e13b51a39078f03ce7b9a4ddc52daf56cd6cc3ace28a4bcd75b007732c7b7b https://raw.githubusercontent.com/PRO-Robotech/addons-operator/22b73fde37e6f824a86fd8ee33498f427798989e/config/crd/bases/addons.in-cloud.io_addons.yaml
+gateway-api-standard-install.yaml 751002b3b91a87f7ae3bd2517c79a47a8d7ed6702901808a1cf9bd97d284f9b8 https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.5.1/standard-install.yaml
+cilium.io_ciliumnetworkpolicies.yaml 1b1738a904de1152c43078e6a873440aea100f30f10ce5ed4e8622524c13fa43 https://raw.githubusercontent.com/cilium/cilium/v1.19.4/pkg/k8s/apis/cilium.io/client/crds/v2/ciliumnetworkpolicies.yaml
+cilium.io_ciliumclusterwidenetworkpolicies.yaml ae742b7ad66ddb4af752b6ae9787f2d3bc4597e3f29df80417967767f9bf2a79 https://raw.githubusercontent.com/cilium/cilium/v1.19.4/pkg/k8s/apis/cilium.io/client/crds/v2/ciliumclusterwidenetworkpolicies.yaml

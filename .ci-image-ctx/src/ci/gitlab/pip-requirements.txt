@@ -1,0 +1,14 @@
+# Пакеты Python заданий CI (#70) — один перечень для образа (ci/image/Dockerfile) и bootstrap
+# без образа (ci/gitlab/bootstrap.sh): pip install --no-deps --require-hashes --only-binary=:all: -r.
+# Индекс — из окружения задания (PIP_INDEX_URL, PIP_EXTRA_INDEX_URL; умолчание pip — pypi.org):
+# зеркало отдаёт раннер, адреса зеркала в дереве нет (решение диспетчера 2026-10-28). Индекс
+# зеркала Яндекса неполон (/pypi/web/simple/yamllint/ без 1.35.1) — раннер ставит pypi.org вторым
+# индексом. Каждый файл сверяется по sha256 — тому же, что публикует pypi.org
+# (pypi.org/pypi/<пакет>/<версия>/json, digests.sha256): индекс подменить файл не может.
+# PyYAML — два колеса: cp311 — golang:*-bookworm заданий без образа (bootstrap), cp313 — образ CI
+# (golang:1.26.10 — trixie); pip берёт совместимое. Зависимости перечислены все (--no-deps):
+# pathspec — у yamllint (pathspec>=0.5.3), PyYAML — у обоих.
+pyyaml==6.0.2 --hash=sha256:3ad2a3decf9aaba3d29c8f537ac4b243e36bef957511b4766cb0057d32b0be85 --hash=sha256:70b189594dbe54f75ab3a1acec5f1e3faa7e8cf2f1e08d9b561cb41b845f69d5
+yamllint==1.35.1 --hash=sha256:2e16e504bb129ff515b37823b472750b36b6de07963bd74b307341ef5ad8bdc3
+pathspec==1.1.1 --hash=sha256:a00ce642f577bf7f473932318056212bc4f8bfdf53128c78bbd5af0b9b20b189
+yamale==5.3.0 --hash=sha256:4671d2d502782222a69056e95b5ff26318da1ca31a54f9c2c90624458c44783a
