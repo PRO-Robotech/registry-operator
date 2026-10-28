@@ -39,16 +39,31 @@
 # команде go (строка «go: » в журнале), net-retry запускает её ещё раз только через первый
 # прокси перечня и печатает его ответ строками «net-retry: прокси |»: прошло — итог 0 (сбоил
 # лишь прямой путь); нет — 75 и строка «прокси … сбоил сам» либо «ответил отказом не по сети».
+#
+# Вывод попытки — в памяти, без файла (#70, конвейер 351650): на полном диске прежний журнал в
+# /tmp терял текст отказа, и сеть читалась «не сетью». Попытка с кодом не 0 печатает за выводом
+# место и inode диска (строки «net-retry: диск |»: df -Pk /tmp и каталога задания, df -Pi /tmp).
+# Текст «no space left on device» (ENOSPC) — «диск узла заполнен»: код 75 и строка NOT EXECUTED
+# без повтора, лишь после строк df — без них причина не названа. --is-net читает журнал и с stdin
+# (аргумент «-»).
 set -u
 NET='dial tcp|i/o timeout|connection reset|connection refused|connection timed out|tls handshake timeout|curl[: (]+56|recv failure|stream error|internal_error|context deadline exceeded|code = deadlineexceeded|timeout awaiting response headers|client\.timeout exceeded|server misbehaving|network is unreachable|unexpected eof|bad gateway|service unavailable|gateway timeout|toomanyrequests|too many requests|couldn.t connect to server|could not connect to server|gnutls recv error|non-properly terminated'
 NOT_NET='checksum mismatch|security error|unknown revision|missing go\.sum entry|manifest unknown|repository does not exist|no matching manifest|no such host|404 not found|410 gone|server response: not found'
 MARK='net-retry: NOT EXECUTED'
 
+ENOSPC='no space left on device'
+
+# is_net <код> <текст> — 0: отказ сетевой, 1: нет.
 is_net() {
   [ "$1" = 0 ] && return 1
-  grep -Eiq -- "$NOT_NET" "$2" && return 1
+  printf '%s\n' "$2" | grep -Eiq -- "$NOT_NET" && return 1
   case "$1" in 124|137) return 0 ;; esac
-  grep -Eiq -- "$NET" "$2"
+  printf '%s\n' "$2" | grep -Eiq -- "$NET"
+}
+
+# disk — место и inode диска задания строками «net-retry: диск |»; вопрос не прошёл — его строка.
+disk() {
+  { df -Pk /tmp ${CI_PROJECT_DIR:+"$CI_PROJECT_DIR"}; df -Pi /tmp; } 2>&1 | sed 's/^/net-retry: диск | /' >&2
 }
 
 # why <код> — чем была попытка, засчитанная «не выполнилось».
@@ -66,7 +81,7 @@ number() { case "$1" in ''|*[!0-9]*) return 1 ;; esac; }
 # прошёл, 1 — нет либо не применим. Учётные данные в адресе прокси не печатаются.
 via_proxy() {
   case "${GOPROXY:-}" in *'|'*) ;; *) return 1 ;; esac
-  grep -Eq '^[[:space:]]*go: ' "$log" || return 1
+  printf '%s\n' "$out" | grep -Eq '^[[:space:]]*go: ' || return 1
   first=$(printf '%s\n' "$GOPROXY" | tr ',|' '\n\n' | grep -v -x -e direct -e off -e '' | head -n 1)
   [ -n "$first" ] || return 1
   shown=$(printf '%s\n' "$first" | sed 's#://[^/@]*@#://#')
@@ -74,13 +89,13 @@ via_proxy() {
   [ "$plimit" -le 300 ] || plimit=300
   echo "net-retry: GOPROXY с «|» — go уходит в direct на любом отказе прокси, отказ выше может быть отказом прямого пути; проверочный запуск только через прокси $shown (срок $plimit с):" >&2
   prc=0
-  GOPROXY=$first timeout -k 10 "$plimit" "$@" > "$log" 2>&1 || prc=$?
-  tail -n 20 "$log" | sed 's/^/net-retry: прокси | /' >&2
+  pout=$(GOPROXY=$first timeout -k 10 "$plimit" "$@" 2>&1) || prc=$?
+  printf '%s\n' "$pout" | tail -n 20 | sed 's/^/net-retry: прокси | /' >&2
   if [ "$prc" = 0 ]; then
     echo "net-retry: через прокси $shown — успех: сбоил лишь прямой путь, итог 0" >&2
     return 0
   fi
-  if is_net "$prc" "$log"; then
+  if is_net "$prc" "$pout"; then
     echo "net-retry: прокси $shown сбоил сам: $(why "$prc")" >&2
   else
     echo "net-retry: прокси $shown ответил отказом не по сети (код $prc); прямой путь — по сети" >&2
@@ -90,8 +105,8 @@ via_proxy() {
 
 case "${1:-}" in
   --is-net)
-    [ "$#" = 3 ] && number "$2" && [ -f "$3" ] || { echo "net-retry: --is-net <код> <журнал>" >&2; exit 64; }
-    is_net "$2" "$3"
+    [ "$#" = 3 ] && number "$2" && { [ "$3" = - ] || [ -f "$3" ]; } || { echo "net-retry: --is-net <код> <журнал | ->" >&2; exit 64; }
+    is_net "$2" "$(cat -- "$3")"
     exit $?
     ;;
   --verdict)
@@ -101,14 +116,11 @@ case "${1:-}" in
       echo "net-retry: сборку остановил сетевой отказ загрузки (строка NOT EXECUTED) — код 75, вердикта о дереве нет" >&2
       exit 75
     fi
-    own=$(mktemp "${TMPDIR:-/tmp}/net-verdict.XXXXXX") || exit 64
-    grep -E '^error building image:' "$3" > "$own"
-    if [ -s "$own" ] && is_net 1 "$own"; then
-      rm -f "$own"
+    own=$(grep -E '^error building image:' "$3")
+    if [ -n "$own" ] && is_net 1 "$own"; then
       echo "net-retry: загрузка самого сборщика упала по сети — код 75, вердикта о дереве нет" >&2
       exit 75
     fi
-    rm -f "$own"
     [ "$2" = 75 ] && exit 1
     exit "$2"
     ;;
@@ -118,15 +130,18 @@ esac
   { echo "net-retry: <попыток> <срок попытки, с> <пауза, с> <команда…>" >&2; exit 64; }
 attempts=$1 limit=$2 pause=$3
 shift 3
-log=$(mktemp "${TMPDIR:-/tmp}/net-retry.XXXXXX") || exit 64
-trap 'rm -f "$log"' EXIT
 i=1
 while :; do
   rc=0
-  timeout -k 10 "$limit" "$@" > "$log" 2>&1 || rc=$?
-  cat "$log"
+  out=$(timeout -k 10 "$limit" "$@" 2>&1) || rc=$?
+  [ -z "$out" ] || printf '%s\n' "$out"
   [ "$rc" = 0 ] && exit 0
-  if ! is_net "$rc" "$log"; then
+  disk
+  if printf '%s\n' "$out" | grep -Fiq -- "$ENOSPC"; then
+    echo "$MARK — «$*»: диск узла заполнен (no space left on device, код $rc; место и inode — строки «net-retry: диск |» выше) — вердикта о дереве нет, код 75" >&2
+    exit 75
+  fi
+  if ! is_net "$rc" "$out"; then
     echo "net-retry: «$*» — отказ не сетевой (код $rc): красное, без повтора" >&2
     [ "$rc" = 75 ] && exit 1
     exit "$rc"
